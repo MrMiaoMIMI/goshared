@@ -7,26 +7,26 @@ import (
 )
 
 var (
-	_ dbspi.DbConfig = (*DbConfig)(nil)
+	_ dbspi.DbConfig         = (*DbConfig)(nil)
 	_ dbspi.PaginationConfig = (*PaginationConfig)(nil)
-	_ dbspi.OrderConfig = (*OrderConfig)(nil)
+	_ dbspi.OrderConfig      = (*OrderConfig)(nil)
 )
 
 type DbConfig struct {
-	host string
-	port uint
-	user string
+	host     string
+	port     uint
+	user     string
 	password string
-	dbName string
+	dbName   string
 }
 
 func NewDbConfig(host string, port uint, user string, password string, dbName string) dbspi.DbConfig {
 	return &DbConfig{
-		host: host,
-		port: port,
-		user: user,
+		host:     host,
+		port:     port,
+		user:     user,
 		password: password,
-		dbName: dbName,
+		dbName:   dbName,
 	}
 }
 
@@ -55,7 +55,7 @@ func (c *DbConfig) GetDSN() string {
 }
 
 type PaginationConfig struct {
-	limit *int
+	limit  *int
 	offset *int
 	orders []dbspi.OrderConfig
 }
@@ -91,16 +91,15 @@ func (c *PaginationConfig) Orders() []dbspi.OrderConfig {
 	return c.orders
 }
 
-
 type OrderConfig struct {
 	column dbspi.Column
-	desc bool
+	desc   bool
 }
 
 func NewOrderConfig(column dbspi.Column, desc bool) dbspi.OrderConfig {
 	return &OrderConfig{
 		column: column,
-		desc: desc,
+		desc:   desc,
 	}
 }
 

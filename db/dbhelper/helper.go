@@ -41,13 +41,17 @@ func Not(condition dbspi.Condition) dbspi.Query {
 }
 
 // NewExecutor creates a new Executor for Table T
-func NewExecutor[T dbspi.Tabler](db dbspi.Db) dbspi.Executor[T] {
-	return dbsp.NewExecutor[T](db)
+// Example:
+// NewExecutor(db, &User{})
+func NewExecutor[T dbspi.Entity](db dbspi.Db, entityInstance T) dbspi.Executor[T] {
+	return dbsp.NewExecutor(db, entityInstance)
 }
 
 // NewExecutorWithTableName creates a new Executor for Table T with the given table name
-func NewExecutorWithTableName[T dbspi.Tabler](db dbspi.Db, tableName string) dbspi.Executor[T] {
-	return dbsp.NewExecutorWithTableName[T](db, tableName)
+// Example:
+// NewExecutorWithTableName(db, &User{}, "user_tab_00000001")
+func NewExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string) dbspi.Executor[T] {
+	return dbsp.NewExecutorWithTableName(db, entityInstance, tableName)
 }
 
 // NewUpdater creates a new Updater
