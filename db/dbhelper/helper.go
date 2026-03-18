@@ -54,6 +54,20 @@ func NewExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tab
 	return dbsp.NewExecutorWithTableName(db, entityInstance, tableName)
 }
 
+// NewEnhancedExecutor creates a new EnhancedExecutor for Table T
+// Example:
+// NewEnhancedExecutor(db, &User{})
+func NewEnhancedExecutor[T dbspi.Entity](db dbspi.Db, entityInstance T) dbspi.EnhancedExecutor[T] {
+	return dbsp.NewExecutor(db, entityInstance)
+}
+
+// NewEnhancedExecutorWithTableName creates a new EnhancedExecutor for Table T with the given table name
+// Example:
+// NewEnhancedExecutorWithTableName(db, &User{}, "user_tab_00000001")
+func NewEnhancedExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string) dbspi.EnhancedExecutor[T] {
+	return dbsp.NewExecutorWithTableName(db, entityInstance, tableName)
+}
+
 // NewUpdater creates a new Updater
 func NewUpdater() dbspi.Updater {
 	return dbsp.NewUpdater()

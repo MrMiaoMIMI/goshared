@@ -418,14 +418,14 @@ type GormExecutor[T dbspi.Entity] struct {
 // NewExecutor creates a new GormExecutor with the given entity instance
 // Example:
 // NewExecutor(db, &User{})
-func NewExecutor[T dbspi.Entity](db dbspi.Db, entityInstance T) dbspi.Executor[T] {
+func NewExecutor[T dbspi.Entity](db dbspi.Db, entityInstance T) *GormExecutor[T] {
 	return NewExecutorWithTableName(db, entityInstance, entityInstance.TableName())
 }
 
 // NewExecutorWithTableName creates a new GormExecutor with the given entity instance and table name
 // Example:
 // NewExecutorWithTableName(db, &User{}, "user_tab_00000001")
-func NewExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string) dbspi.Executor[T] {
+func NewExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string) *GormExecutor[T] {
 	if any(entityInstance) == nil {
 		panic("entityInstance is nil")
 	}
