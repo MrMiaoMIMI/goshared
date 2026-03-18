@@ -348,12 +348,21 @@ func Not(condition dbspi.Condition) dbspi.Query {
 func (q *GormQuery) ToGormExpression() clause.Expression {
 	gormExpressions := make([]clause.Expression, 0, len(q.conditions))
 	for _, cond := range q.conditions {
+		if cond == nil {
+			continue
+		}
 		if gc, ok := cond.(gormExpression); ok {
+			if gc.ToGormExpression() == nil {
+				continue
+			}
 			gormExpressions = append(gormExpressions, gc.ToGormExpression())
 		} else {
 			// TODO: Warning or error log ?
 			continue
 		}
+	}
+	if len(gormExpressions) == 0 {
+		return nil
 	}
 	switch q.keyword {
 	case keywordAnd:
