@@ -65,6 +65,11 @@ type Entity interface {
 }
 
 type Executor[T Entity] interface {
+	// Shard routes to a specific shard by the given sharding key.
+	// Returns the resolved Executor bound to the target Db and physical table.
+	// For non-sharded Executor, this is a no-op and returns (self, nil).
+	Shard(key any) (Executor[T], error)
+
 	// Helpful Methods
 	// If T implements Ider interface, xxById methods get id field name from Ider.IdFiledName(),
 	// otherwise use "id" as the id field name
@@ -89,6 +94,16 @@ type Executor[T Entity] interface {
 	// Raw sql methods
 	Raw(ctx context.Context, sql string, args ...any) ([]T, error)
 	Exec(ctx context.Context, sql string, args ...any) error
+
+	// Scatter-gather methods across all shards.
+	// For non-sharded Executor, FindAll is equivalent to Find, CountAll is equivalent to Count.
+	//
+	// FindAll returns ALL matching rows from all shards.
+	// batchSize controls the number of rows fetched per batch from each shard.
+	// When batchSize > 0, each shard is queried iteratively in batches until exhausted.
+	// When batchSize <= 0, each shard is queried all at once (no batching).
+	FindAll(ctx context.Context, query Query, batchSize int) ([]T, error)
+	CountAll(ctx context.Context, query Query) (uint64, error)
 }
 
 // Db is the interface for the database

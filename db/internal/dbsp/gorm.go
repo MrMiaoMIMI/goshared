@@ -431,6 +431,21 @@ func NewExecutor[T dbspi.Entity](db dbspi.Db, entityInstance T) *GormExecutor[T]
 	return NewExecutorWithTableName(db, entityInstance, entityInstance.TableName())
 }
 
+// Shard is a no-op for non-sharded executor, returns self.
+func (e *GormExecutor[T]) Shard(_ any) (dbspi.Executor[T], error) {
+	return e, nil
+}
+
+// FindAll is equivalent to Find for non-sharded executor.
+func (e *GormExecutor[T]) FindAll(ctx context.Context, query dbspi.Query, batchSize int) ([]T, error) {
+	return e.Find(ctx, query, nil)
+}
+
+// CountAll is equivalent to Count for non-sharded executor.
+func (e *GormExecutor[T]) CountAll(ctx context.Context, query dbspi.Query) (uint64, error) {
+	return e.Count(ctx, query)
+}
+
 // NewExecutorWithTableName creates a new GormExecutor with the given entity instance and table name
 // Example:
 // NewExecutorWithTableName(db, &User{}, "user_tab_00000001")
