@@ -93,6 +93,7 @@ type httpClient struct {
 	header         http.Header
 	queryStructs   []any
 	queryParams    url.Values
+	headerStructs  []any
 	bodyJSON       any
 	bodyXML        any
 	bodyForm       map[string]string
@@ -182,6 +183,13 @@ func (c *httpClient) AddCookies(cookies ...*http.Cookie) httpspi.Client {
 	return c
 }
 
+func (c *httpClient) HeaderStruct(headerStruct any) httpspi.Client {
+	if headerStruct != nil {
+		c.headerStructs = append(c.headerStructs, headerStruct)
+	}
+	return c
+}
+
 // ==================== URL ====================
 
 func (c *httpClient) Base(rawURL string) httpspi.Client {
@@ -201,6 +209,23 @@ func (c *httpClient) QueryParam(key, value string) httpspi.Client {
 		c.queryParams = make(url.Values)
 	}
 	c.queryParams.Add(key, value)
+	return c
+}
+
+// ==================== Composite ====================
+
+func (c *httpClient) RequestStruct(requestStruct any) httpspi.Client {
+	if requestStruct == nil {
+		return c
+	}
+	c.QueryStruct(requestStruct)
+	c.HeaderStruct(requestStruct)
+
+	jsonBody, err := extractJSONBody(requestStruct)
+	if err == nil && jsonBody != nil {
+		c.bodyJSON = jsonBody
+		c.header.Set("Content-Type", "application/json")
+	}
 	return c
 }
 
@@ -299,6 +324,10 @@ func (c *httpClient) ResponseDecoder(decoder httpspi.ResponseDecoder) httpspi.Cl
 func (c *httpClient) Receive(ctx context.Context, timeout time.Duration, successV, failureV any) (*http.Response, error) {
 	reqURL, err := c.buildURL()
 	if err != nil {
+		return nil, err
+	}
+
+	if err := c.applyHeaderStructs(); err != nil {
 		return nil, err
 	}
 
@@ -408,6 +437,22 @@ func (c *httpClient) Request(ctx context.Context, successV, failureV any) (*http
 }
 
 // ==================== Internal helpers ====================
+
+func (c *httpClient) applyHeaderStructs() error {
+	for _, hs := range c.headerStructs {
+		encoded, err := encodeHeaderStruct(hs)
+		if err != nil {
+			return fmt.Errorf("http: failed to encode header struct: %w", err)
+		}
+		for k, vs := range encoded {
+			for _, v := range vs {
+				c.header.Set(k, v)
+			}
+		}
+	}
+	c.headerStructs = nil
+	return nil
+}
 
 func (c *httpClient) buildURL() (string, error) {
 	baseURL := c.baseURL

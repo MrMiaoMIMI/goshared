@@ -35,6 +35,12 @@ type Client interface {
 	// HeaderMap sets the Client's headers, replacing the old values of the keys.
 	HeaderMap(headers map[string]string) Client
 
+	// HeaderStruct sets HTTP headers from the struct's fields tagged with `header`.
+	// The headerStruct argument should be a pointer to a struct with "header" tagged fields.
+	// Fields tagged with `header:"Header-Name"` are set as HTTP headers.
+	// Use `header:"Header-Name,omitempty"` to skip zero-value fields.
+	HeaderStruct(headerStruct any) Client
+
 	// BearerToken sets the Authorization header with a Bearer token.
 	BearerToken(token string) Client
 
@@ -84,6 +90,18 @@ type Client interface {
 
 	// Options sets the request method to OPTIONS and sets the given pathURL.
 	Options(pathURL string) Client
+
+	// ==================== Composite ====================
+
+	// RequestStruct configures query parameters, headers, and JSON body from a
+	// single struct using multiple struct tags:
+	//   - Fields tagged with `url:"name"` become query parameters
+	//   - Fields tagged with `header:"name"` become HTTP headers
+	//   - Fields tagged with `json:"name"` are collected into a JSON request body
+	//
+	// A field may carry multiple tags to appear in more than one part of the request.
+	// Use the ",omitempty" option on any tag to skip zero-value fields.
+	RequestStruct(requestStruct any) Client
 
 	// ==================== Body ====================
 
