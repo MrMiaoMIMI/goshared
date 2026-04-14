@@ -462,7 +462,7 @@ func NewExecutor[T dbspi.Entity](db dbspi.Db, entityInstance T) *GormExecutor[T]
 }
 
 // Shard is a no-op for non-sharded executor, returns self.
-func (e *GormExecutor[T]) Shard(_ any) (dbspi.Executor[T], error) {
+func (e *GormExecutor[T]) Shard(_ *dbspi.ShardingKey) (dbspi.Executor[T], error) {
 	return e, nil
 }
 
@@ -595,11 +595,6 @@ func (e *GormExecutor[T]) BatchCreate(ctx context.Context, entities []T, batchSi
 func (e *GormExecutor[T]) BatchSave(ctx context.Context, entities []T) error {
 	err := e.db.BatchSave(ctx, entities)
 	return err
-}
-
-// Upsert implements dbspi.Executor
-func (e *GormExecutor[T]) Upsert(ctx context.Context, entity T, updateColumns []dbspi.Column) error {
-	return e.db.Upsert(ctx, entity, updateColumns)
 }
 
 // FirstOrCreate implements dbspi.Executor
@@ -799,20 +794,6 @@ func (d *GormDb) Exec(ctx context.Context, sql string, args ...any) error {
 	return err
 }
 
-// Upsert implements dbspi.Db
-func (d *GormDb) Upsert(ctx context.Context, entity dbspi.Entity, updateColumns []dbspi.Column) error {
-	if len(updateColumns) == 0 {
-		return d.db.WithContext(ctx).Save(entity).Error
-	}
-	cols := make([]clause.Column, len(updateColumns))
-	for i, c := range updateColumns {
-		cols[i] = clause.Column{Name: c.Name()}
-	}
-	return d.db.WithContext(ctx).Clauses(clause.OnConflict{
-		DoUpdates: clause.AssignmentColumns(columnNames(updateColumns)),
-	}).Create(entity).Error
-}
-
 // FirstOrCreate implements dbspi.Db
 func (d *GormDb) FirstOrCreate(ctx context.Context, entity dbspi.Entity, query dbspi.Query) error {
 	db := d.db.WithContext(ctx)
@@ -821,14 +802,6 @@ func (d *GormDb) FirstOrCreate(ctx context.Context, entity dbspi.Entity, query d
 		db = db.Clauses(gormClause)
 	}
 	return db.FirstOrCreate(entity).Error
-}
-
-func columnNames(columns []dbspi.Column) []string {
-	names := make([]string, len(columns))
-	for i, c := range columns {
-		names[i] = c.Name()
-	}
-	return names
 }
 
 // Transaction implements dbspi.Db

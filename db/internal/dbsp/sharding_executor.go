@@ -17,7 +17,9 @@ type ShardedExecutorConfig struct {
 	Dbs            []dbspi.DbTarget
 	DbRule         dbspi.DbShardingRule
 	TableRule      dbspi.TableShardingRule
-	MaxConcurrency int // max concurrent goroutines for FindAll/CountAll, 0 = unlimited
+	DbKeyField    string // DB column name for extracting db sharding value from ShardingKey
+	TableKeyField string // DB column name for extracting table sharding value from ShardingKey
+	MaxConcurrency int
 }
 
 type shardedExecutor[T dbspi.Entity] struct {
@@ -25,6 +27,8 @@ type shardedExecutor[T dbspi.Entity] struct {
 	dbs            []dbspi.DbTarget
 	dbRule         dbspi.DbShardingRule
 	tableRule      dbspi.TableShardingRule
+	dbKeyField     string
+	tableKeyField  string
 	maxConcurrency int
 }
 
@@ -41,26 +45,48 @@ func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *sh
 		dbs:            cfg.Dbs,
 		dbRule:         cfg.DbRule,
 		tableRule:      cfg.TableRule,
+		dbKeyField:     cfg.DbKeyField,
+		tableKeyField:  cfg.TableKeyField,
 		maxConcurrency: cfg.MaxConcurrency,
 	}
 }
 
-// findDb looks up the Db by matching the target key against DbTarget.Key in the list.
-func (e *shardedExecutor[T]) findDb(targetKey any) (dbspi.Db, error) {
+// findDb looks up the Db by matching the target key string.
+func (e *shardedExecutor[T]) findDb(targetKey string) (dbspi.Db, error) {
 	for _, dt := range e.dbs {
-		if fmt.Sprintf("%v", dt.Key) == fmt.Sprintf("%v", targetKey) {
+		if dt.Key == targetKey {
 			return dt.Db, nil
 		}
 	}
-	return nil, fmt.Errorf("no DbTarget found for key: %v", targetKey)
+	return nil, fmt.Errorf("no DbTarget found for key: %s", targetKey)
 }
 
-// resolve determines the target Db and physical table name for the given sharding key.
-func (e *shardedExecutor[T]) resolve(key any) (dbspi.Db, string, error) {
+// extractDbValue extracts the ShardingValue for the db rule from the ShardingKey.
+func (e *shardedExecutor[T]) extractDbValue(sk *dbspi.ShardingKey) (dbspi.ShardingValue, error) {
+	if e.dbKeyField == "" {
+		return dbspi.ShardingValue{}, fmt.Errorf("db_sharding.key_field is required")
+	}
+	return sk.Get(e.dbKeyField)
+}
+
+// extractTableValue extracts the ShardingValue for the table rule from the ShardingKey.
+func (e *shardedExecutor[T]) extractTableValue(sk *dbspi.ShardingKey) (dbspi.ShardingValue, error) {
+	if e.tableKeyField == "" {
+		return dbspi.ShardingValue{}, fmt.Errorf("table_sharding.key_field is required")
+	}
+	return sk.Get(e.tableKeyField)
+}
+
+// resolve determines the target Db and physical table name for the given ShardingKey.
+func (e *shardedExecutor[T]) resolve(sk *dbspi.ShardingKey) (dbspi.Db, string, error) {
 	var db dbspi.Db
 
 	if e.dbRule != nil {
-		targetKey, err := e.dbRule.ResolveDbKey(key)
+		val, err := e.extractDbValue(sk)
+		if err != nil {
+			return nil, "", fmt.Errorf("db sharding: %w", err)
+		}
+		targetKey, err := e.dbRule.ResolveDbKey(val)
 		if err != nil {
 			return nil, "", fmt.Errorf("resolve db key failed: %w", err)
 		}
@@ -74,8 +100,11 @@ func (e *shardedExecutor[T]) resolve(key any) (dbspi.Db, string, error) {
 
 	tableName := e.entity.TableName()
 	if e.tableRule != nil {
-		var err error
-		tableName, err = e.tableRule.ResolveTable(e.entity.TableName(), key)
+		val, err := e.extractTableValue(sk)
+		if err != nil {
+			return nil, "", fmt.Errorf("table sharding: %w", err)
+		}
+		tableName, err = e.tableRule.ResolveTable(e.entity.TableName(), val)
 		if err != nil {
 			return nil, "", fmt.Errorf("resolve table failed: %w", err)
 		}
@@ -84,26 +113,26 @@ func (e *shardedExecutor[T]) resolve(key any) (dbspi.Db, string, error) {
 	return db, tableName, nil
 }
 
-// resolveExecutor creates a single-table executor for the given sharding key.
-func (e *shardedExecutor[T]) resolveExecutor(key any) (dbspi.Executor[T], error) {
-	db, tableName, err := e.resolve(key)
+// resolveExecutor creates a single-table executor for the given ShardingKey.
+func (e *shardedExecutor[T]) resolveExecutor(sk *dbspi.ShardingKey) (dbspi.Executor[T], error) {
+	db, tableName, err := e.resolve(sk)
 	if err != nil {
 		return nil, err
 	}
 	return NewExecutorWithTableName(db, e.entity, tableName), nil
 }
 
-// resolveFromCtx extracts the sharding key from context and resolves the executor.
+// resolveFromCtx extracts the ShardingKey from context and resolves the executor.
 func (e *shardedExecutor[T]) resolveFromCtx(ctx context.Context) (dbspi.Executor[T], error) {
-	key, ok := dbspi.ShardingKeyFromCtx(ctx)
+	sk, ok := dbspi.ShardingKeyFromCtx(ctx)
 	if !ok {
 		return nil, dbspi.ErrShardingKeyRequired
 	}
-	return e.resolveExecutor(key)
+	return e.resolveExecutor(sk)
 }
 
-// Shard routes to a specific shard by the given sharding key.
-func (e *shardedExecutor[T]) Shard(key any) (dbspi.Executor[T], error) {
+// Shard routes to a specific shard by the given ShardingKey.
+func (e *shardedExecutor[T]) Shard(key *dbspi.ShardingKey) (dbspi.Executor[T], error) {
 	return e.resolveExecutor(key)
 }
 
@@ -232,14 +261,6 @@ func (e *shardedExecutor[T]) DeleteByQuery(ctx context.Context, query dbspi.Quer
 	return exec.DeleteByQuery(ctx, query)
 }
 
-func (e *shardedExecutor[T]) Upsert(ctx context.Context, entity T, updateColumns []dbspi.Column) error {
-	exec, err := e.resolveFromCtx(ctx)
-	if err != nil {
-		return err
-	}
-	return exec.Upsert(ctx, entity, updateColumns)
-}
-
 func (e *shardedExecutor[T]) FirstOrCreate(ctx context.Context, entity T, query dbspi.Query) (T, error) {
 	exec, err := e.resolveFromCtx(ctx)
 	if err != nil {
@@ -273,66 +294,35 @@ type shardTarget struct {
 	tableName string
 }
 
-// allShardTargets computes the cross-product of all (Db, TableName) combinations.
-// When both DbRule and TableRule are Enumerable, it produces the full cross-product.
-// When only one is Enumerable, it pairs with the default for the other dimension.
+// allShardTargets computes all (Db, TableName) combinations for scatter-gather.
+// Uses the stored dbs list directly and ShardCounter for the table dimension.
 func (e *shardedExecutor[T]) allShardTargets() ([]shardTarget, error) {
 	logicalTable := e.entity.TableName()
-
-	var dbKeys []any
-	var tableKeys []any
-
-	if e.dbRule != nil {
-		if enum, ok := e.dbRule.(dbspi.Enumerable); ok {
-			dbKeys = enum.AllKeys()
-		}
-	}
-	if e.tableRule != nil {
-		if enum, ok := e.tableRule.(dbspi.Enumerable); ok {
-			tableKeys = enum.AllKeys()
-		}
-	}
-
-	if len(dbKeys) == 0 && len(tableKeys) == 0 {
-		return nil, fmt.Errorf("FindAll/CountAll: neither DbShardingRule nor TableShardingRule implements Enumerable")
-	}
-
 	var targets []shardTarget
 
-	if len(dbKeys) > 0 && len(tableKeys) > 0 {
-		// Cross-product: every Db × every Table
-		for _, dk := range dbKeys {
-			db, err := e.findDb(dk)
-			if err != nil {
-				return nil, err
-			}
-			for _, tk := range tableKeys {
-				tableName, err := e.tableRule.ResolveTable(logicalTable, tk)
+	tableCount := 0
+	if e.tableRule != nil {
+		if counter, ok := e.tableRule.(dbspi.ShardCounter); ok {
+			tableCount = counter.ShardCount()
+		}
+	}
+
+	for _, dt := range e.dbs {
+		if tableCount > 0 {
+			for i := 0; i < tableCount; i++ {
+				tableName, err := e.tableRule.ResolveTable(logicalTable, dbspi.IntVal(int64(i)))
 				if err != nil {
-					return nil, fmt.Errorf("resolve table for key %v failed: %w", tk, err)
+					return nil, fmt.Errorf("resolve table for index %d failed: %w", i, err)
 				}
-				targets = append(targets, shardTarget{db: db, tableName: tableName})
+				targets = append(targets, shardTarget{db: dt.Db, tableName: tableName})
 			}
+		} else {
+			targets = append(targets, shardTarget{db: dt.Db, tableName: logicalTable})
 		}
-	} else if len(tableKeys) > 0 {
-		// Table sharding only: single Db × all tables
-		db := e.dbs[0].Db
-		for _, tk := range tableKeys {
-			tableName, err := e.tableRule.ResolveTable(logicalTable, tk)
-			if err != nil {
-				return nil, fmt.Errorf("resolve table for key %v failed: %w", tk, err)
-			}
-			targets = append(targets, shardTarget{db: db, tableName: tableName})
-		}
-	} else {
-		// Db sharding only: all Dbs × single table
-		for _, dk := range dbKeys {
-			db, err := e.findDb(dk)
-			if err != nil {
-				return nil, err
-			}
-			targets = append(targets, shardTarget{db: db, tableName: logicalTable})
-		}
+	}
+
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("FindAll/CountAll: no shard targets available")
 	}
 
 	return targets, nil

@@ -20,6 +20,17 @@ func NewDbConfig(host string, port uint, user string, password string, dbName st
 	return dbsp.NewDbConfig(host, port, user, password, dbName, opts...)
 }
 
+// NewDbConfigFromDSN creates a DbConfig from a raw DSN string.
+// Example: NewDbConfigFromDSN("root:pass@tcp(10.0.0.1:3306)/mydb?charset=utf8mb4&parseTime=True&loc=Local")
+func NewDbConfigFromDSN(dsn string, opts ...DbConfigOption) dbspi.DbConfig {
+	return dbsp.NewDbConfigFromDSN(dsn, opts...)
+}
+
+// NewDbFromDSN creates a Db instance from a raw DSN string.
+func NewDbFromDSN(dsn string, opts ...DbConfigOption) dbspi.Db {
+	return NewDb(NewDbConfigFromDSN(dsn, opts...))
+}
+
 // WithMaxOpenConns sets the maximum number of open connections to the database.
 func WithMaxOpenConns(n int) DbConfigOption { return dbsp.WithMaxOpenConns(n) }
 

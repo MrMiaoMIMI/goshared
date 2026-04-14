@@ -13,6 +13,7 @@ var (
 )
 
 type DbConfig struct {
+	dsn                    string
 	host                   string
 	port                   uint
 	user                   string
@@ -61,6 +62,22 @@ func NewDbConfig(host string, port uint, user string, password string, dbName st
 	return cfg
 }
 
+// NewDbConfigFromDSN creates a DbConfig from a raw DSN string.
+// Connection pool settings can be configured via opts.
+func NewDbConfigFromDSN(dsn string, opts ...DbConfigOption) dbspi.DbConfig {
+	cfg := &DbConfig{
+		dsn:                    dsn,
+		maxOpenConns:           100,
+		maxIdleConns:           10,
+		connMaxLifetimeSeconds: 3600,
+		debugMode:              false,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return cfg
+}
+
 func (c *DbConfig) Host() string                { return c.host }
 func (c *DbConfig) Port() uint                  { return c.port }
 func (c *DbConfig) User() string                { return c.user }
@@ -72,6 +89,9 @@ func (c *DbConfig) ConnMaxLifetimeSeconds() int  { return c.connMaxLifetimeSecon
 func (c *DbConfig) DebugMode() bool              { return c.debugMode }
 
 func (c *DbConfig) GetDSN() string {
+	if c.dsn != "" {
+		return c.dsn
+	}
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local", c.User(), c.Password(), c.Host(), c.Port(), c.DbName())
 }
 

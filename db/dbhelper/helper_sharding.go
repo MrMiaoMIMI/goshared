@@ -2,6 +2,7 @@ package dbhelper
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/MrMiaoMIMI/goshared/db/dbspi"
 	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp"
@@ -16,6 +17,8 @@ type shardConfig struct {
 	dbs            []dbspi.DbTarget
 	dbRule         dbspi.DbShardingRule
 	tableRule      dbspi.TableShardingRule
+	dbKeyField     string
+	tableKeyField  string
 	maxConcurrency int
 }
 
@@ -32,6 +35,8 @@ func NewShardedExecutor[T dbspi.Entity](entity T, opts ...ShardOption) dbspi.Exe
 		Dbs:            cfg.dbs,
 		DbRule:         cfg.dbRule,
 		TableRule:      cfg.tableRule,
+		DbKeyField:    cfg.dbKeyField,
+		TableKeyField: cfg.tableKeyField,
 		MaxConcurrency: cfg.maxConcurrency,
 	})
 }
@@ -39,7 +44,7 @@ func NewShardedExecutor[T dbspi.Entity](entity T, opts ...ShardOption) dbspi.Exe
 // ================== Sharding Options ==================
 
 // WithDbs sets the database target list for sharding.
-// Each DbTarget maps a routing key to a Db instance.
+// Each DbTarget maps a routing key string to a Db instance.
 // Use SingleDb() or IndexedDbs() for convenience.
 func WithDbs(dbs []dbspi.DbTarget) ShardOption {
 	return func(c *shardConfig) {
@@ -61,6 +66,22 @@ func WithTableRule(rule dbspi.TableShardingRule) ShardOption {
 	}
 }
 
+// WithDbKeyField sets the DB column name for extracting the db sharding value
+// from the ShardingKey.
+func WithDbKeyField(field string) ShardOption {
+	return func(c *shardConfig) {
+		c.dbKeyField = field
+	}
+}
+
+// WithTableKeyField sets the DB column name for extracting the table sharding value
+// from the ShardingKey.
+func WithTableKeyField(field string) ShardOption {
+	return func(c *shardConfig) {
+		c.tableKeyField = field
+	}
+}
+
 // WithMaxConcurrency sets the max number of concurrent goroutines
 // for scatter-gather operations (FindAll / CountAll).
 // Default 0 means unlimited concurrency.
@@ -73,24 +94,24 @@ func WithMaxConcurrency(n int) ShardOption {
 
 // ================== Convenience functions for DbTarget ==================
 
-// SingleDb wraps a single Db into a []DbTarget with key 0.
+// SingleDb wraps a single Db into a []DbTarget with key "0".
 // Use this for table-only sharding (single database, multiple tables).
 func SingleDb(db dbspi.Db) []dbspi.DbTarget {
-	return []dbspi.DbTarget{{Key: 0, Db: db}}
+	return []dbspi.DbTarget{{Key: "0", Db: db}}
 }
 
-// IndexedDbs creates a []DbTarget with sequential integer keys (0, 1, 2, ...).
-// Use this with hash-mod db rules where the target key is an integer index.
+// IndexedDbs creates a []DbTarget with sequential string keys ("0", "1", "2", ...).
+// Use this with hash-mod db rules where the target key is a stringified index.
 func IndexedDbs(dbs ...dbspi.Db) []dbspi.DbTarget {
 	targets := make([]dbspi.DbTarget, len(dbs))
 	for i, db := range dbs {
-		targets[i] = dbspi.DbTarget{Key: i, Db: db}
+		targets[i] = dbspi.DbTarget{Key: strconv.Itoa(i), Db: db}
 	}
 	return targets
 }
 
 // NamedDbs creates a []DbTarget with string keys.
-// Use this with custom db rules where the target key is a string (e.g., country code).
+// Use this with named/direct db rules where the target key is a string (e.g., country code).
 func NamedDbs(dbs map[string]dbspi.Db) []dbspi.DbTarget {
 	targets := make([]dbspi.DbTarget, 0, len(dbs))
 	for name, db := range dbs {
@@ -102,9 +123,9 @@ func NamedDbs(dbs map[string]dbspi.Db) []dbspi.DbTarget {
 // ================== DbTarget generation helpers ==================
 
 // DbTargetEntry represents a single entry for generating DbTarget.
-// Key is the routing key, DbName is the database name on the server.
+// Key is the routing key string, DbName is the database name on the server.
 type DbTargetEntry struct {
-	Key    any
+	Key    string
 	DbName string
 }
 
@@ -144,7 +165,7 @@ func GenDbTargetsByNames(host string, port uint, user, password string, dbNames 
 	return GenDbTargets(host, port, user, password, entries...)
 }
 
-// GenDbTargetsByIndex creates []DbTarget with integer keys (0, 1, 2, ...)
+// GenDbTargetsByIndex creates []DbTarget with string keys ("0", "1", "2", ...)
 // and database names generated from a prefix + index: "{prefix}_{index}".
 // Use with NewHashModDbRule(count).
 //
@@ -153,12 +174,12 @@ func GenDbTargetsByNames(host string, port uint, user, password string, dbNames 
 //	targets := dbhelper.GenDbTargetsByIndex("10.0.0.1", 3306, "root", "pass",
 //	    "order_db", 4,
 //	)
-//	// Result: [{Key:0, Db:"order_db_0"}, {Key:1, Db:"order_db_1"}, ...]
+//	// Result: [{Key:"0", Db:"order_db_0"}, {Key:"1", Db:"order_db_1"}, ...]
 func GenDbTargetsByIndex(host string, port uint, user, password string, prefix string, count int) []dbspi.DbTarget {
 	entries := make([]DbTargetEntry, count)
 	for i := 0; i < count; i++ {
 		entries[i] = DbTargetEntry{
-			Key:    i,
+			Key:    strconv.Itoa(i),
 			DbName: fmt.Sprintf("%s_%d", prefix, i),
 		}
 	}
@@ -166,8 +187,7 @@ func GenDbTargetsByIndex(host string, port uint, user, password string, prefix s
 }
 
 // GenDbTargetsByFunc creates []DbTarget using a user-provided function that
-// generates (key, dbName) pairs. The function receives no arguments and returns
-// a list of DbTargetEntry.
+// generates (key, dbName) pairs.
 //
 // Example (region-based):
 //
@@ -199,7 +219,7 @@ func GenDbTargetsBySuffix(host string, port uint, user, password string, prefix,
 	for i, key := range keys {
 		entries[i] = DbTargetEntry{
 			Key:    key,
-			DbName: prefix + fmt.Sprintf("%v", key) + suffix,
+			DbName: prefix + key + suffix,
 		}
 	}
 	return GenDbTargets(host, port, user, password, entries...)
@@ -220,30 +240,33 @@ func NewHashModTableRuleWithFormat(shardCount int, suffixFormat string) dbspi.Ta
 }
 
 // NewCustomTableRule creates a custom table sharding rule with the given function.
-func NewCustomTableRule(fn func(logicalTable string, key any) (string, error)) dbspi.TableShardingRule {
+func NewCustomTableRule(fn func(logicalTable string, key dbspi.ShardingValue) (string, error)) dbspi.TableShardingRule {
 	return dbsp.NewCustomTableRule(fn)
 }
 
 // ================== Db Sharding Rules ==================
 
 // NewHashModDbRule creates a hash-mod database sharding rule.
-// Returns target key as int (0-based index), use with IndexedDbs().
+// Returns target key as a string ("0", "1", ...), use with IndexedDbs().
 func NewHashModDbRule(dbCount int) dbspi.DbShardingRule {
 	return dbsp.NewHashModDbRule(dbCount)
 }
 
 // NewRangeDbRule creates a range-based database sharding rule.
 // boundaries defines the upper bound (exclusive) for each shard.
-// Returns target key as int (0-based index), use with IndexedDbs().
-// Example: boundaries=[1000, 2000] with IndexedDbs(db0, db1, db2)
-//
-//	key < 1000 → db0, 1000 <= key < 2000 → db1, key >= 2000 → db2
+// Returns target key as a string ("0", "1", ...), use with IndexedDbs().
 func NewRangeDbRule(boundaries []int64) dbspi.DbShardingRule {
 	return dbsp.NewRangeDbRule(boundaries)
 }
 
+// NewDirectDbRule creates a direct (pass-through) database sharding rule.
+// The sharding value's String() is used directly as the target key to match DbTarget.Key.
+func NewDirectDbRule() dbspi.DbShardingRule {
+	return dbsp.NewDirectDbRule()
+}
+
 // NewCustomDbRule creates a custom database sharding rule with the given function.
-// The fn should return a target key that matches against DbTarget.Key in the DbTarget list.
-func NewCustomDbRule(fn func(key any) (targetKey any, err error)) dbspi.DbShardingRule {
+// The fn should return a target key string that matches DbTarget.Key.
+func NewCustomDbRule(fn func(key dbspi.ShardingValue) (string, error)) dbspi.DbShardingRule {
 	return dbsp.NewCustomDbRule(fn)
 }

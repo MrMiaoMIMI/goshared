@@ -1,0 +1,202 @@
+package example
+
+import (
+	"context"
+	"testing"
+
+	"github.com/MrMiaoMIMI/goshared/db/dbhelper"
+	"github.com/MrMiaoMIMI/goshared/db/dbspi"
+)
+
+// ================================================================
+// DbManager Example: Top-down configuration-driven database management
+//
+// One config → one DbManager → all executors.
+// Entity declares its database group via DbKey().
+// No need to manually create DbConfig, Db, DbTarget, or sharding rules.
+// ================================================================
+
+// ==================== Entity Definitions ====================
+
+// User is a non-sharded entity. No DbKey() → uses "default" database.
+// (User struct is defined in db_test.go)
+
+// OrderItem shares the same database group as Order.
+type OrderItem struct {
+	ID      int64 `gorm:"primaryKey"`
+	OrderID int64 `gorm:"column:order_id"`
+	ShopID  int64 `gorm:"column:shop_id"`
+	Name    string
+}
+
+func (*OrderItem) TableName() string  { return "order_item_tab" }
+func (*OrderItem) DbKey() string      { return "order_dbs" }
+func (*OrderItem) IdFiledName() string { return "id" }
+
+// OrderDetail shares the same database group but has different table sharding.
+type OrderDetail struct {
+	ID      int64 `gorm:"primaryKey"`
+	OrderID int64 `gorm:"column:order_id"`
+	ShopID  int64 `gorm:"column:shop_id"`
+	Detail  string
+}
+
+func (*OrderDetail) TableName() string  { return "order_detail_tab" }
+func (*OrderDetail) DbKey() string      { return "order_dbs" }
+func (*OrderDetail) IdFiledName() string { return "id" }
+
+// ==================== DbManager: Non-sharded ====================
+
+func Test_DbManager_Simple(t *testing.T) {
+	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
+		Databases: map[string]dbhelper.DatabaseEntry{
+			"default": {
+				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				DbName: "my_app_db",
+			},
+		},
+	})
+
+	userExec := dbhelper.For(&User{}, mgr)
+
+	ctx := context.Background()
+	users, err := userExec.Find(ctx, nil, nil)
+	t.Logf("DbManager simple: users=%v, err=%v", users, err)
+}
+
+// ==================== DbManager: DSN mode ====================
+
+func Test_DbManager_DSN(t *testing.T) {
+	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
+		Databases: map[string]dbhelper.DatabaseEntry{
+			"default": {
+				DSN:          "root:pass@tcp(127.0.0.1:3306)/my_app_db?charset=utf8mb4&parseTime=True&loc=Local",
+				MaxOpenConns: 200,
+			},
+		},
+	})
+
+	userExec := dbhelper.For(&User{}, mgr)
+
+	ctx := context.Background()
+	users, err := userExec.Find(ctx, nil, nil)
+	t.Logf("DbManager DSN: users=%v, err=%v", users, err)
+}
+
+// ==================== DbManager: Sharded with reuse ====================
+
+func Test_DbManager_ShardedWithReuse(t *testing.T) {
+	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
+		Databases: map[string]dbhelper.DatabaseEntry{
+			"default": {
+				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				DbName: "my_app_db",
+			},
+			"order_dbs": {
+				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				DbSharding: &dbhelper.DbShardConfig{
+					Rule: "hash_mod", KeyField: "shop_id", Count: 4, Prefix: "order_db",
+				},
+				TableSharding: &dbhelper.TableShardConfig{
+					Rule: "hash_mod", KeyField: "shop_id", Count: 10,
+				},
+				MaxConcurrency: 5,
+				EntityRules: []dbhelper.EntityRule{
+					{
+						Tables: []string{"order_detail_tab"},
+						TableSharding: &dbhelper.TableShardConfig{
+							Rule: "hash_mod", KeyField: "shop_id", Count: 20,
+						},
+					},
+				},
+			},
+		},
+	})
+
+	orderExec := dbhelper.For(&Order{}, mgr)
+	itemExec := dbhelper.For(&OrderItem{}, mgr)
+	detailExec := dbhelper.For(&OrderDetail{}, mgr)
+
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, dbspi.IntVal(12345))
+	ctx := dbspi.WithShardingKey(context.Background(), sk)
+
+	orders, err := orderExec.Find(ctx, nil, nil)
+	t.Logf("Order (4×10): orders=%v, err=%v", orders, err)
+
+	items, err := itemExec.Find(ctx, nil, nil)
+	t.Logf("OrderItem (4×10, shared): items=%v, err=%v", items, err)
+
+	details, err := detailExec.Find(ctx, nil, nil)
+	t.Logf("OrderDetail (4×20, overridden): details=%v, err=%v", details, err)
+}
+
+// ==================== DbManager: Named db sharding ====================
+
+func Test_DbManager_NamedDbSharding(t *testing.T) {
+	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
+		Databases: map[string]dbhelper.DatabaseEntry{
+			"default": {
+				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				DbName: "my_app_db",
+			},
+			"order_dbs": {
+				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				DbSharding: &dbhelper.DbShardConfig{
+					Rule:     "named",
+					KeyField: "region",
+					Prefix:   "order_",
+					Suffix:   "_db",
+					Keys:     []string{"SG", "TH", "ID"},
+				},
+				TableSharding: &dbhelper.TableShardConfig{
+					Rule: "hash_mod", KeyField: "shop_id", Count: 10,
+				},
+			},
+		},
+	})
+
+	orderExec := dbhelper.For(&Order{}, mgr)
+
+	sk := dbspi.NewShardingKey().
+		Set(OrderFields.Region, dbspi.StrVal("SG")).
+		Set(OrderFields.ShopID, dbspi.IntVal(12345))
+	ctx := dbspi.WithShardingKey(context.Background(), sk)
+	orders, err := orderExec.Find(ctx, nil, nil)
+	t.Logf("Named db sharding (SG): orders=%v, err=%v", orders, err)
+}
+
+// ==================== DbManager: Global default ====================
+
+func Test_DbManager_GlobalDefault(t *testing.T) {
+	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
+		Databases: map[string]dbhelper.DatabaseEntry{
+			"default": {
+				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				DbName: "my_app_db",
+			},
+			"order_dbs": {
+				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				DbSharding: &dbhelper.DbShardConfig{
+					Rule: "hash_mod", KeyField: "shop_id", Count: 4, Prefix: "order_db",
+				},
+				TableSharding: &dbhelper.TableShardConfig{
+					Rule: "hash_mod", KeyField: "shop_id", Count: 10,
+				},
+			},
+		},
+	})
+
+	dbhelper.SetDefault(mgr)
+
+	userExec := dbhelper.For(&User{})
+	orderExec := dbhelper.For(&Order{})
+
+	ctx := context.Background()
+	users, err := userExec.Find(ctx, nil, nil)
+	t.Logf("Global default - User: users=%v, err=%v", users, err)
+
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, dbspi.IntVal(12345))
+	ctx = dbspi.WithShardingKey(ctx, sk)
+	orders, err := orderExec.Find(ctx, nil, nil)
+	t.Logf("Global default - Order: orders=%v, err=%v", orders, err)
+}

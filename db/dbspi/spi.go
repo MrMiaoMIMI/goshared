@@ -71,11 +71,19 @@ type Entity interface {
 	TableName() string
 }
 
+// DbKeyProvider is an optional interface for entities to declare which
+// database configuration key they belong to.
+// Used by DbManager to route entities to the correct database/sharding group.
+// If not implemented, "default" is used.
+type DbKeyProvider interface {
+	DbKey() string
+}
+
 type Executor[T Entity] interface {
-	// Shard routes to a specific shard by the given sharding key.
+	// Shard routes to a specific shard by the given ShardingKey.
 	// Returns the resolved Executor bound to the target Db and physical table.
 	// For non-sharded Executor, this is a no-op and returns (self, nil).
-	Shard(key any) (Executor[T], error)
+	Shard(key *ShardingKey) (Executor[T], error)
 
 	// Helpful Methods
 	// If T implements Ider interface, xxById methods get id field name from Ider.IdFiledName(),
