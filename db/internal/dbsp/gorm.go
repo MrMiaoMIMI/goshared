@@ -3,6 +3,7 @@ package dbsp
 import (
 	"context"
 	"reflect"
+	"time"
 
 	"github.com/MrMiaoMIMI/goshared/db/dbspi"
 
@@ -238,6 +239,17 @@ func (f *GormField[T]) LtEq(v *T) dbspi.Condition {
 	})
 }
 
+// Between implements dbspi.Field
+func (f *GormField[T]) Between(min, max *T) dbspi.Condition {
+	if min == nil || max == nil {
+		return nil
+	}
+	return newCondition(clause.And(
+		clause.Gte{Column: f.columnExpr(), Value: *min},
+		clause.Lte{Column: f.columnExpr(), Value: *max},
+	))
+}
+
 // Like implements dbspi.Field
 func (f *GormField[T]) Like(v *string) dbspi.Condition {
 	if v == nil {
@@ -328,6 +340,24 @@ func newQuery(keyword queryKeyword, conditions ...dbspi.Condition) dbspi.Query {
 // NewQuery creates a new GormQuery with AND keyword
 func NewQuery(conditions ...dbspi.Condition) dbspi.Query {
 	return newQuery(keywordAnd, conditions...)
+}
+
+// GormSelectQuery implements dbspi.SelectQuery
+type GormSelectQuery struct {
+	*GormQuery
+	columns []dbspi.Column
+}
+
+func (q *GormSelectQuery) Columns() []dbspi.Column {
+	return q.columns
+}
+
+// Select wraps a query with specific column selection.
+func Select(columns []dbspi.Column, conditions ...dbspi.Condition) dbspi.SelectQuery {
+	return &GormSelectQuery{
+		GormQuery: &GormQuery{keyword: keywordAnd, conditions: conditions},
+		columns:   columns,
+	}
 }
 
 // And creates a new GormQuery with AND keyword
@@ -567,6 +597,17 @@ func (e *GormExecutor[T]) BatchSave(ctx context.Context, entities []T) error {
 	return err
 }
 
+// Upsert implements dbspi.Executor
+func (e *GormExecutor[T]) Upsert(ctx context.Context, entity T, updateColumns []dbspi.Column) error {
+	return e.db.Upsert(ctx, entity, updateColumns)
+}
+
+// FirstOrCreate implements dbspi.Executor
+func (e *GormExecutor[T]) FirstOrCreate(ctx context.Context, entity T, query dbspi.Query) (T, error) {
+	err := e.db.FirstOrCreate(ctx, entity, query)
+	return entity, err
+}
+
 // Raw implements dbspi.Executor
 func (e *GormExecutor[T]) Raw(ctx context.Context, sql string, args ...any) ([]T, error) {
 	var results []T
@@ -594,11 +635,31 @@ type GormDb struct {
 
 // NewGormDb creates a new GormDb
 func NewGormDb(dbConfig dbspi.DbConfig) dbspi.Db {
-	db, err := gorm.Open(mysql.Open(dbConfig.GetDSN()), &gorm.Config{})
+	gormCfg := &gorm.Config{}
+
+	db, err := gorm.Open(mysql.Open(dbConfig.GetDSN()), gormCfg)
 	if err != nil {
 		panic(err)
 	}
-	db = db.Debug()
+
+	if dbConfig.DebugMode() {
+		db = db.Debug()
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		panic(err)
+	}
+	if dbConfig.MaxOpenConns() > 0 {
+		sqlDB.SetMaxOpenConns(dbConfig.MaxOpenConns())
+	}
+	if dbConfig.MaxIdleConns() > 0 {
+		sqlDB.SetMaxIdleConns(dbConfig.MaxIdleConns())
+	}
+	if dbConfig.ConnMaxLifetimeSeconds() > 0 {
+		sqlDB.SetConnMaxLifetime(time.Duration(dbConfig.ConnMaxLifetimeSeconds()) * time.Second)
+	}
+
 	return &GormDb{
 		db: db,
 	}
@@ -636,6 +697,14 @@ func (d *GormDb) Find(ctx context.Context, dest any, query dbspi.Query, pagenati
 				Columns: orders,
 			})
 		}
+	}
+
+	if sq, ok := query.(dbspi.SelectQuery); ok && len(sq.Columns()) > 0 {
+		colNames := make([]string, len(sq.Columns()))
+		for i, c := range sq.Columns() {
+			colNames[i] = c.Name()
+		}
+		db = db.Select(colNames)
 	}
 
 	gormClause := queryToGormClause(query)
@@ -728,6 +797,46 @@ func (d *GormDb) Raw(ctx context.Context, dest any, sql string, args ...any) err
 func (d *GormDb) Exec(ctx context.Context, sql string, args ...any) error {
 	err := d.db.WithContext(ctx).Exec(sql, args...).Error
 	return err
+}
+
+// Upsert implements dbspi.Db
+func (d *GormDb) Upsert(ctx context.Context, entity dbspi.Entity, updateColumns []dbspi.Column) error {
+	if len(updateColumns) == 0 {
+		return d.db.WithContext(ctx).Save(entity).Error
+	}
+	cols := make([]clause.Column, len(updateColumns))
+	for i, c := range updateColumns {
+		cols[i] = clause.Column{Name: c.Name()}
+	}
+	return d.db.WithContext(ctx).Clauses(clause.OnConflict{
+		DoUpdates: clause.AssignmentColumns(columnNames(updateColumns)),
+	}).Create(entity).Error
+}
+
+// FirstOrCreate implements dbspi.Db
+func (d *GormDb) FirstOrCreate(ctx context.Context, entity dbspi.Entity, query dbspi.Query) error {
+	db := d.db.WithContext(ctx)
+	gormClause := queryToGormClause(query)
+	if gormClause != nil {
+		db = db.Clauses(gormClause)
+	}
+	return db.FirstOrCreate(entity).Error
+}
+
+func columnNames(columns []dbspi.Column) []string {
+	names := make([]string, len(columns))
+	for i, c := range columns {
+		names[i] = c.Name()
+	}
+	return names
+}
+
+// Transaction implements dbspi.Db
+func (d *GormDb) Transaction(ctx context.Context, fn dbspi.TxFn) error {
+	return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txDB := &GormDb{db: tx}
+		return fn(txDB)
+	})
 }
 
 func queryToGormClause(query dbspi.Query) clause.Expression {

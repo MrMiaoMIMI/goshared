@@ -35,6 +35,12 @@ type Client interface {
 	// HeaderMap sets the Client's headers, replacing the old values of the keys.
 	HeaderMap(headers map[string]string) Client
 
+	// BearerToken sets the Authorization header with a Bearer token.
+	BearerToken(token string) Client
+
+	// BasicAuth sets the Authorization header with HTTP Basic Auth credentials.
+	BasicAuth(username, password string) Client
+
 	// AddCookies adds cookies to the request's header.
 	// All cookies added will be written into the same line with Cookie header and separated by semicolon.
 	// All cookies only contain the sanitized name and value using net/http sanitizeCookieName and sanitizeCookieValue methods
@@ -84,6 +90,15 @@ type Client interface {
 	// BodyJSON sets the Client's Request body to the JSON encoded value of bodyJSON
 	// and sets the Content-Type header to "application/json".
 	BodyJSON(bodyJSON any) Client
+
+	// BodyForm sets the Client's Request body to URL-encoded form data
+	// and sets the Content-Type header to "application/x-www-form-urlencoded".
+	BodyForm(values map[string]string) Client
+
+	// BodyMultipart sets a multipart/form-data body with file data.
+	// fieldName is the form field name, fileName is the uploaded file name,
+	// fileData is the file content, and extraFields are additional text fields.
+	BodyMultipart(fieldName, fileName string, fileData []byte, extraFields map[string]string) Client
 
 	// BodyBytes sets the Client's Request body to the given raw bytes.
 	BodyBytes(bytes []byte) Client

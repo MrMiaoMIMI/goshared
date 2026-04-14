@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -102,6 +103,26 @@ func NamedErr(key string, err error) Field {
 // Any 创建任意类型字段（使用反射，性能较低，建议优先使用具体类型）
 func Any(key string, val interface{}) Field {
 	return Field{zapField: zap.Any(key, val)}
+}
+
+// Stringer 创建 fmt.Stringer 类型字段
+func Stringer(key string, val fmt.Stringer) Field {
+	return Field{zapField: zap.Stringer(key, val)}
+}
+
+// Binary 创建二进制数据字段（base64 编码输出）
+func Binary(key string, val []byte) Field {
+	return Field{zapField: zap.Binary(key, val)}
+}
+
+// Stack 创建调用栈字段（当前 goroutine 的完整栈跟踪）
+func Stack(key string) Field {
+	return Field{zapField: zap.Stack(key)}
+}
+
+// Namespace 创建命名空间字段，后续字段会嵌套在此命名空间下
+func Namespace(key string) Field {
+	return Field{zapField: zap.Namespace(key)}
 }
 
 // ============ 数组/切片类型字段构造函数 ============

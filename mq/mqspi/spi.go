@@ -7,6 +7,8 @@ import (
 
 type Producer interface {
 	Produce(ctx context.Context, msg *ProducerMessage) error
+	// BatchProduce sends multiple messages synchronously. Returns error on first failure.
+	BatchProduce(ctx context.Context, msgs []*ProducerMessage) error
 	AsyncProduce(ctx context.Context, msg *ProducerMessage, callback AsyncProduceCallback)
 	// Check checks whether there are active brokers and whether configured topics exist
 	Check(ctx context.Context) error

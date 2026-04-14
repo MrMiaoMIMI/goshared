@@ -7,6 +7,10 @@ type DbConfig interface {
 	Password() string
 	DbName() string
 	GetDSN() string
+	MaxOpenConns() int
+	MaxIdleConns() int
+	ConnMaxLifetimeSeconds() int
+	DebugMode() bool
 }
 
 type PaginationConfig interface {

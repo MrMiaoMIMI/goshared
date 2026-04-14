@@ -44,3 +44,16 @@ func WithDefaultTimeout(d time.Duration) ClientOption {
 func WithHTTPClient(c *http.Client) ClientOption {
 	return httpsp.WithHTTPClient(c)
 }
+
+// WithRetry sets the max retry count and delay between retries for transient failures.
+// Only network errors and 5xx responses trigger retries.
+//
+// Example:
+//
+//	client := httphelper.NewClient(
+//	    httphelper.WithBaseURL("https://api.example.com"),
+//	    httphelper.WithRetry(3, 500*time.Millisecond),
+//	)
+func WithRetry(maxRetries int, delay time.Duration) ClientOption {
+	return httpsp.WithRetry(maxRetries, delay)
+}

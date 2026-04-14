@@ -1,6 +1,8 @@
 package dbhelper
 
 import (
+	"context"
+
 	"github.com/MrMiaoMIMI/goshared/db/dbspi"
 	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp"
 )
@@ -10,10 +12,25 @@ func NewDb(dbConfig dbspi.DbConfig) dbspi.Db {
 	return dbsp.NewGormDb(dbConfig)
 }
 
+// DbConfigOption is a type alias so callers don't need to import the internal package.
+type DbConfigOption = dbsp.DbConfigOption
+
 // NewDbConfig creates a DbConfig, used for NewDb
-func NewDbConfig(host string, port uint, user string, password string, dbName string) dbspi.DbConfig {
-	return dbsp.NewDbConfig(host, port, user, password, dbName)
+func NewDbConfig(host string, port uint, user string, password string, dbName string, opts ...DbConfigOption) dbspi.DbConfig {
+	return dbsp.NewDbConfig(host, port, user, password, dbName, opts...)
 }
+
+// WithMaxOpenConns sets the maximum number of open connections to the database.
+func WithMaxOpenConns(n int) DbConfigOption { return dbsp.WithMaxOpenConns(n) }
+
+// WithMaxIdleConns sets the maximum number of idle connections in the pool.
+func WithMaxIdleConns(n int) DbConfigOption { return dbsp.WithMaxIdleConns(n) }
+
+// WithConnMaxLifetimeSeconds sets the maximum lifetime of a connection in seconds.
+func WithConnMaxLifetimeSeconds(s int) DbConfigOption { return dbsp.WithConnMaxLifetimeSeconds(s) }
+
+// WithDebugMode enables or disables GORM debug logging.
+func WithDebugMode(debug bool) DbConfigOption { return dbsp.WithDebugMode(debug) }
 
 // NewField creates a T type field, used for query and update
 func NewField[T any](columnName string) dbspi.Field[T] {
@@ -38,6 +55,19 @@ func Or(conditions ...dbspi.Condition) dbspi.Query {
 // Not creates a new Query with NOT keyword
 func Not(condition dbspi.Condition) dbspi.Query {
 	return dbsp.Not(condition)
+}
+
+// Select creates a query that only returns specific columns.
+// Example:
+//
+//	nameField := dbhelper.NewField[string]("name")
+//	ageField := dbhelper.NewField[int]("age")
+//	results, err := executor.Find(ctx, dbhelper.Select(
+//	    []dbspi.Column{nameField, ageField},
+//	    nameField.Like(ptrutil.Of("%test%")),
+//	), nil)
+func Select(columns []dbspi.Column, conditions ...dbspi.Condition) dbspi.SelectQuery {
+	return dbsp.Select(columns, conditions...)
 }
 
 // NewExecutor creates a new Executor for Table T
@@ -66,6 +96,22 @@ func NewEnhancedExecutor[T dbspi.Entity](db dbspi.Db, entityInstance T) dbspi.En
 // NewEnhancedExecutorWithTableName(db, &User{}, "user_tab_00000001")
 func NewEnhancedExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string) dbspi.EnhancedExecutor[T] {
 	return dbsp.NewExecutorWithTableName(db, entityInstance, tableName)
+}
+
+// Transaction runs fn within a database transaction.
+// The transaction is committed if fn returns nil; rolled back otherwise.
+//
+// Example:
+//
+//	err := dbhelper.Transaction(ctx, db, func(tx dbspi.Db) error {
+//	    exec := dbhelper.NewExecutor(tx, &User{})
+//	    if err := exec.Create(ctx, user); err != nil {
+//	        return err
+//	    }
+//	    return exec.Create(ctx, profile)
+//	})
+func Transaction(ctx context.Context, db dbspi.Db, fn dbspi.TxFn) error {
+	return db.Transaction(ctx, fn)
 }
 
 // NewUpdater creates a new Updater

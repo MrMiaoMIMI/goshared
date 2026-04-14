@@ -35,6 +35,18 @@ func WithDefaultTTL(d time.Duration) CacheOption {
 	return func(c *cacheConfig) { c.defaultTTL = d }
 }
 
+func WithNumCounters(n int64) CacheOption {
+	return func(c *cacheConfig) { c.numCounters = n }
+}
+
+func WithMaxCost(n int64) CacheOption {
+	return func(c *cacheConfig) { c.maxCost = n }
+}
+
+func WithBufferItems(n int64) CacheOption {
+	return func(c *cacheConfig) { c.bufferItems = n }
+}
+
 // RistrettoCache implements cachespi.Cache using dgraph-io/ristretto as the backend.
 type RistrettoCache struct {
 	cache      *ristretto.Cache[string, any]
@@ -85,6 +97,19 @@ func (c *RistrettoCache) Get(_ context.Context, key string, receiver any, _ ...c
 	return setReceiver(receiver, val)
 }
 
+func (c *RistrettoCache) GetOrDefault(_ context.Context, key string, defaultVal any, receiver any, _ ...cachespi.OperationOption) error {
+	val, found := c.cache.Get(key)
+	if !found {
+		return setReceiver(receiver, defaultVal)
+	}
+	return setReceiver(receiver, val)
+}
+
+func (c *RistrettoCache) Exists(_ context.Context, key string, _ ...cachespi.OperationOption) (bool, error) {
+	_, found := c.cache.Get(key)
+	return found, nil
+}
+
 func (c *RistrettoCache) GetMany(_ context.Context, receiverMap map[string]any, _ ...cachespi.OperationOption) error {
 	for key, receiver := range receiverMap {
 		val, found := c.cache.Get(key)
@@ -104,6 +129,28 @@ func (c *RistrettoCache) Set(_ context.Context, key string, value any, expire ti
 	c.cache.SetWithTTL(key, value, 1, ttl)
 	c.cache.Wait()
 	return nil
+}
+
+// SetNX is best-effort for in-memory cache (not truly atomic / TOCTOU).
+// Use Redis implementation for production SetNX semantics.
+func (c *RistrettoCache) SetNX(_ context.Context, key string, value any, expire time.Duration, _ ...cachespi.OperationOption) (bool, error) {
+	_, found := c.cache.Get(key)
+	if found {
+		return false, nil
+	}
+	ttl := c.resolveTTL(expire)
+	c.cache.SetWithTTL(key, value, 1, ttl)
+	c.cache.Wait()
+	return true, nil
+}
+
+func (c *RistrettoCache) GetAndDelete(_ context.Context, key string, receiver any, _ ...cachespi.OperationOption) error {
+	val, found := c.cache.Get(key)
+	if !found {
+		return cachespi.ErrCacheMiss
+	}
+	c.cache.Del(key)
+	return setReceiver(receiver, val)
 }
 
 func (c *RistrettoCache) SetMany(_ context.Context, valueMap map[string]any, expire time.Duration, _ ...cachespi.OperationOption) error {
@@ -196,6 +243,26 @@ func (c *RistrettoCache) LoadMany(ctx context.Context, loader cachespi.DataLoade
 		}
 	}
 	return nil
+}
+
+func (c *RistrettoCache) Incr(_ context.Context, key string, delta int64, expire time.Duration, _ ...cachespi.OperationOption) (int64, error) {
+	ttl := c.resolveTTL(expire)
+	val, found := c.cache.Get(key)
+	var current int64
+	if found {
+		switch v := val.(type) {
+		case int64:
+			current = v
+		case int:
+			current = int64(v)
+		default:
+			return 0, fmt.Errorf("cache: key %q holds non-integer value of type %T", key, val)
+		}
+	}
+	newVal := current + delta
+	c.cache.SetWithTTL(key, newVal, 1, ttl)
+	c.cache.Wait()
+	return newVal, nil
 }
 
 func (c *RistrettoCache) Flush(_ context.Context) error {

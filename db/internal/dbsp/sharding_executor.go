@@ -232,6 +232,23 @@ func (e *shardedExecutor[T]) DeleteByQuery(ctx context.Context, query dbspi.Quer
 	return exec.DeleteByQuery(ctx, query)
 }
 
+func (e *shardedExecutor[T]) Upsert(ctx context.Context, entity T, updateColumns []dbspi.Column) error {
+	exec, err := e.resolveFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+	return exec.Upsert(ctx, entity, updateColumns)
+}
+
+func (e *shardedExecutor[T]) FirstOrCreate(ctx context.Context, entity T, query dbspi.Query) (T, error) {
+	exec, err := e.resolveFromCtx(ctx)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return exec.FirstOrCreate(ctx, entity, query)
+}
+
 func (e *shardedExecutor[T]) Raw(ctx context.Context, sql string, args ...any) ([]T, error) {
 	exec, err := e.resolveFromCtx(ctx)
 	if err != nil {

@@ -5,9 +5,12 @@ package httpsp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,6 +29,8 @@ type clientConfig struct {
 	baseURL        string
 	defaultTimeout time.Duration
 	defaultHeaders map[string]string
+	maxRetries     int
+	retryDelay     time.Duration
 }
 
 func defaultClientConfig() *clientConfig {
@@ -56,6 +61,30 @@ func WithDefaultHeaders(headers map[string]string) ClientOption {
 	return func(cfg *clientConfig) { cfg.defaultHeaders = headers }
 }
 
+// WithRetry sets the max retry count and delay between retries for transient failures.
+// Only network errors and 5xx responses trigger retries.
+// Delay must be positive; enforces a minimum of 100ms to prevent tight loops.
+// maxRetries must be >= 0; negative values are clamped to 0.
+func WithRetry(maxRetries int, delay time.Duration) ClientOption {
+	return func(cfg *clientConfig) {
+		if maxRetries < 0 {
+			maxRetries = 0
+		}
+		cfg.maxRetries = maxRetries
+		if delay < 100*time.Millisecond {
+			delay = 100 * time.Millisecond
+		}
+		cfg.retryDelay = delay
+	}
+}
+
+type multipartData struct {
+	fieldName   string
+	fileName    string
+	fileData    []byte
+	extraFields map[string]string
+}
+
 type httpClient struct {
 	rawClient      *http.Client
 	baseURL        string
@@ -65,9 +94,14 @@ type httpClient struct {
 	queryStructs   []any
 	queryParams    url.Values
 	bodyJSON       any
+	bodyXML        any
+	bodyForm       map[string]string
+	bodyMultipart  *multipartData
 	bodyBytes      []byte
 	respDecoder    httpspi.ResponseDecoder
 	defaultTimeout time.Duration
+	maxRetries     int
+	retryDelay     time.Duration
 	cookies        []*http.Cookie
 }
 
@@ -88,6 +122,8 @@ func NewHTTPClient(opts ...ClientOption) httpspi.Client {
 		baseURL:        cfg.baseURL,
 		header:         header,
 		defaultTimeout: cfg.defaultTimeout,
+		maxRetries:     cfg.maxRetries,
+		retryDelay:     cfg.retryDelay,
 		respDecoder:    &jsonDecoder{},
 	}
 }
@@ -99,6 +135,8 @@ func (c *httpClient) New() httpspi.Client {
 		header:         c.header.Clone(),
 		respDecoder:    c.respDecoder,
 		defaultTimeout: c.defaultTimeout,
+		maxRetries:     c.maxRetries,
+		retryDelay:     c.retryDelay,
 	}
 }
 
@@ -125,6 +163,17 @@ func (c *httpClient) HeaderMap(headers map[string]string) httpspi.Client {
 	for k, v := range headers {
 		c.header.Set(k, v)
 	}
+	return c
+}
+
+func (c *httpClient) BearerToken(token string) httpspi.Client {
+	c.header.Set("Authorization", "Bearer "+token)
+	return c
+}
+
+func (c *httpClient) BasicAuth(username, password string) httpspi.Client {
+	cred := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	c.header.Set("Authorization", "Basic "+cred)
 	return c
 }
 
@@ -209,6 +258,32 @@ func (c *httpClient) BodyJSON(bodyJSON any) httpspi.Client {
 	return c
 }
 
+func (c *httpClient) BodyForm(values map[string]string) httpspi.Client {
+	if values != nil {
+		c.bodyForm = values
+		c.header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	return c
+}
+
+func (c *httpClient) BodyXML(bodyXML any) httpspi.Client {
+	if bodyXML != nil {
+		c.bodyXML = bodyXML
+		c.header.Set("Content-Type", "application/xml")
+	}
+	return c
+}
+
+func (c *httpClient) BodyMultipart(fieldName, fileName string, fileData []byte, extraFields map[string]string) httpspi.Client {
+	c.bodyMultipart = &multipartData{
+		fieldName:   fieldName,
+		fileName:    fileName,
+		fileData:    fileData,
+		extraFields: extraFields,
+	}
+	return c
+}
+
 func (c *httpClient) BodyBytes(b []byte) httpspi.Client {
 	c.bodyBytes = b
 	return c
@@ -227,53 +302,82 @@ func (c *httpClient) Receive(ctx context.Context, timeout time.Duration, success
 		return nil, err
 	}
 
-	body, err := c.buildBody()
-	if err != nil {
-		return nil, err
-	}
-
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
 	method := c.method
 	if method == "" {
 		method = http.MethodGet
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, reqURL, body)
-	if err != nil {
-		return nil, err
-	}
+	maxAttempts := 1 + c.maxRetries
+	var lastResp *http.Response
+	var lastErr error
 
-	req.Header = c.header.Clone()
-	for _, cookie := range c.cookies {
-		req.AddCookie(cookie)
-	}
-
-	resp, err := c.rawClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	decoder := c.respDecoder
-	if decoder == nil {
-		decoder = &jsonDecoder{}
-	}
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if successV != nil {
-			err = decoder.Decode(resp, successV)
+	for attempt := range maxAttempts {
+		body, err := c.buildBody()
+		if err != nil {
+			return nil, err
 		}
-	} else {
-		if failureV != nil {
-			err = decoder.Decode(resp, failureV)
+
+		reqCtx := ctx
+		var cancel context.CancelFunc
+		if timeout > 0 {
+			reqCtx, cancel = context.WithTimeout(ctx, timeout)
 		}
+
+		req, err := http.NewRequestWithContext(reqCtx, method, reqURL, body)
+		if err != nil {
+			if cancel != nil {
+				cancel()
+			}
+			return nil, err
+		}
+
+		req.Header = c.header.Clone()
+		for _, cookie := range c.cookies {
+			req.AddCookie(cookie)
+		}
+
+		resp, err := c.rawClient.Do(req)
+		if cancel != nil {
+			cancel()
+		}
+
+		if err != nil {
+			lastErr = err
+			if attempt < maxAttempts-1 && c.retryDelay > 0 {
+				time.Sleep(c.retryDelay)
+			}
+			continue
+		}
+
+		if resp.StatusCode >= 500 && attempt < maxAttempts-1 {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			lastErr = httpspi.StatusError{StatusCode: resp.StatusCode, Status: resp.Status}
+			if c.retryDelay > 0 {
+				time.Sleep(c.retryDelay)
+			}
+			continue
+		}
+
+		decoder := c.respDecoder
+		if decoder == nil {
+			decoder = &jsonDecoder{}
+		}
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			if successV != nil {
+				err = decoder.Decode(resp, successV)
+			}
+		} else {
+			if failureV != nil {
+				err = decoder.Decode(resp, failureV)
+			}
+		}
+
+		return resp, err
 	}
 
-	return resp, err
+	return lastResp, lastErr
 }
 
 func (c *httpClient) Request(ctx context.Context, successV, failureV any) (*httpspi.Response, error) {
@@ -361,8 +465,50 @@ func (c *httpClient) buildBody() (io.Reader, error) {
 		}
 		return bytes.NewReader(buf), nil
 	}
+	if c.bodyXML != nil {
+		buf, err := xml.Marshal(c.bodyXML)
+		if err != nil {
+			return nil, fmt.Errorf("http: failed to marshal XML body: %w", err)
+		}
+		return bytes.NewReader(buf), nil
+	}
+	if c.bodyForm != nil {
+		form := url.Values{}
+		for k, v := range c.bodyForm {
+			form.Set(k, v)
+		}
+		return strings.NewReader(form.Encode()), nil
+	}
+	if c.bodyMultipart != nil {
+		return c.buildMultipartBody()
+	}
 	if len(c.bodyBytes) > 0 {
 		return bytes.NewReader(c.bodyBytes), nil
 	}
 	return nil, nil
+}
+
+func (c *httpClient) buildMultipartBody() (io.Reader, error) {
+	mp := c.bodyMultipart
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	part, err := writer.CreateFormFile(mp.fieldName, mp.fileName)
+	if err != nil {
+		return nil, fmt.Errorf("http: failed to create form file: %w", err)
+	}
+	if _, err := part.Write(mp.fileData); err != nil {
+		return nil, fmt.Errorf("http: failed to write file data: %w", err)
+	}
+	for k, v := range mp.extraFields {
+		if err := writer.WriteField(k, v); err != nil {
+			return nil, fmt.Errorf("http: failed to write field %q: %w", k, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("http: failed to close multipart writer: %w", err)
+	}
+
+	c.header.Set("Content-Type", writer.FormDataContentType())
+	return &buf, nil
 }

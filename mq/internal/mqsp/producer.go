@@ -86,6 +86,18 @@ func (p *SaramaProducer) Produce(_ context.Context, msg *mqspi.ProducerMessage) 
 	return nil
 }
 
+func (p *SaramaProducer) BatchProduce(ctx context.Context, msgs []*mqspi.ProducerMessage) error {
+	if p.closed.Load() {
+		return mqspi.ErrProducerClosed
+	}
+	for _, msg := range msgs {
+		if err := p.Produce(ctx, msg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *SaramaProducer) AsyncProduce(ctx context.Context, msg *mqspi.ProducerMessage, callback mqspi.AsyncProduceCallback) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

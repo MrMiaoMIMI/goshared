@@ -31,6 +31,7 @@ type Field[T any] interface {
 	GtEq(v *T) Condition
 	Lt(v *T) Condition
 	LtEq(v *T) Condition
+	Between(min, max *T) Condition
 
 	// String Methods
 	Like(v *string) Condition
@@ -44,6 +45,12 @@ type Field[T any] interface {
 // Query is used to query entities from the database
 type Query interface {
 	Condition
+}
+
+// SelectQuery wraps a Query with specific column selection.
+type SelectQuery interface {
+	Query
+	Columns() []Column
 }
 
 // Updater is used to update the entity
@@ -91,6 +98,9 @@ type Executor[T Entity] interface {
 	UpdateByQuery(ctx context.Context, query Query, updater Updater) error
 	DeleteByQuery(ctx context.Context, query Query) error
 
+	// FirstOrCreate returns the first entity matching the query, creating it if not found.
+	FirstOrCreate(ctx context.Context, entity T, query Query) (T, error)
+
 	// Raw sql methods
 	Raw(ctx context.Context, sql string, args ...any) ([]T, error)
 	Exec(ctx context.Context, sql string, args ...any) error
@@ -105,6 +115,10 @@ type Executor[T Entity] interface {
 	FindAll(ctx context.Context, query Query, batchSize int) ([]T, error)
 	CountAll(ctx context.Context, query Query) (uint64, error)
 }
+
+// TxFn is a function that runs within a transaction.
+// If it returns an error, the transaction is rolled back; otherwise it is committed.
+type TxFn func(tx Db) error
 
 // Db is the interface for the database
 // Generally, you should not use Db methods directly, but use Executor methods instead
@@ -121,6 +135,11 @@ type Db interface {
 	BatchSave(ctx context.Context, entities any) error
 	UpdateByQuery(ctx context.Context, query Query, updater Updater) error
 	DeleteByQuery(ctx context.Context, entity Entity, query Query) error
+	FirstOrCreate(ctx context.Context, entity Entity, query Query) error
 	Raw(ctx context.Context, dest any, sql string, args ...any) error
 	Exec(ctx context.Context, sql string, args ...any) error
+
+	// Transaction runs fn within a database transaction.
+	// The transaction is committed if fn returns nil; rolled back otherwise.
+	Transaction(ctx context.Context, fn TxFn) error
 }
