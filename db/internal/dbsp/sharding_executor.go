@@ -12,13 +12,10 @@ import (
 )
 
 // ShardedExecutorConfig is the internal config for creating a sharded executor.
-// dbhelper converts its ShardOption list into this config.
 type ShardedExecutorConfig struct {
 	Dbs            []dbspi.DbTarget
 	DbRule         dbspi.DbShardingRule
 	TableRule      dbspi.TableShardingRule
-	DbKeyField    string // DB column name for extracting db sharding value from ShardingKey
-	TableKeyField string // DB column name for extracting table sharding value from ShardingKey
 	MaxConcurrency int
 }
 
@@ -27,8 +24,6 @@ type shardedExecutor[T dbspi.Entity] struct {
 	dbs            []dbspi.DbTarget
 	dbRule         dbspi.DbShardingRule
 	tableRule      dbspi.TableShardingRule
-	dbKeyField     string
-	tableKeyField  string
 	maxConcurrency int
 }
 
@@ -45,8 +40,6 @@ func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *sh
 		dbs:            cfg.Dbs,
 		dbRule:         cfg.DbRule,
 		tableRule:      cfg.TableRule,
-		dbKeyField:     cfg.DbKeyField,
-		tableKeyField:  cfg.TableKeyField,
 		maxConcurrency: cfg.MaxConcurrency,
 	}
 }
@@ -61,32 +54,12 @@ func (e *shardedExecutor[T]) findDb(targetKey string) (dbspi.Db, error) {
 	return nil, fmt.Errorf("no DbTarget found for key: %s", targetKey)
 }
 
-// extractDbValue extracts the ShardingValue for the db rule from the ShardingKey.
-func (e *shardedExecutor[T]) extractDbValue(sk *dbspi.ShardingKey) (dbspi.ShardingValue, error) {
-	if e.dbKeyField == "" {
-		return dbspi.ShardingValue{}, fmt.Errorf("db_sharding.key_field is required")
-	}
-	return sk.Get(e.dbKeyField)
-}
-
-// extractTableValue extracts the ShardingValue for the table rule from the ShardingKey.
-func (e *shardedExecutor[T]) extractTableValue(sk *dbspi.ShardingKey) (dbspi.ShardingValue, error) {
-	if e.tableKeyField == "" {
-		return dbspi.ShardingValue{}, fmt.Errorf("table_sharding.key_field is required")
-	}
-	return sk.Get(e.tableKeyField)
-}
-
 // resolve determines the target Db and physical table name for the given ShardingKey.
 func (e *shardedExecutor[T]) resolve(sk *dbspi.ShardingKey) (dbspi.Db, string, error) {
 	var db dbspi.Db
 
 	if e.dbRule != nil {
-		val, err := e.extractDbValue(sk)
-		if err != nil {
-			return nil, "", fmt.Errorf("db sharding: %w", err)
-		}
-		targetKey, err := e.dbRule.ResolveDbKey(val)
+		targetKey, err := e.dbRule.ResolveDbKey(sk)
 		if err != nil {
 			return nil, "", fmt.Errorf("resolve db key failed: %w", err)
 		}
@@ -100,11 +73,8 @@ func (e *shardedExecutor[T]) resolve(sk *dbspi.ShardingKey) (dbspi.Db, string, e
 
 	tableName := e.entity.TableName()
 	if e.tableRule != nil {
-		val, err := e.extractTableValue(sk)
-		if err != nil {
-			return nil, "", fmt.Errorf("table sharding: %w", err)
-		}
-		tableName, err = e.tableRule.ResolveTable(e.entity.TableName(), val)
+		var err error
+		tableName, err = e.tableRule.ResolveTable(e.entity.TableName(), sk)
 		if err != nil {
 			return nil, "", fmt.Errorf("resolve table failed: %w", err)
 		}
@@ -133,6 +103,9 @@ func (e *shardedExecutor[T]) resolveFromCtx(ctx context.Context) (dbspi.Executor
 
 // Shard routes to a specific shard by the given ShardingKey.
 func (e *shardedExecutor[T]) Shard(key *dbspi.ShardingKey) (dbspi.Executor[T], error) {
+	if key == nil {
+		return nil, dbspi.ErrShardingKeyRequired
+	}
 	return e.resolveExecutor(key)
 }
 
@@ -295,7 +268,6 @@ type shardTarget struct {
 }
 
 // allShardTargets computes all (Db, TableName) combinations for scatter-gather.
-// Uses the stored dbs list directly and ShardCounter for the table dimension.
 func (e *shardedExecutor[T]) allShardTargets() ([]shardTarget, error) {
 	logicalTable := e.entity.TableName()
 	var targets []shardTarget
@@ -309,10 +281,14 @@ func (e *shardedExecutor[T]) allShardTargets() ([]shardTarget, error) {
 
 	for _, dt := range e.dbs {
 		if tableCount > 0 {
+			enumerator, ok := e.tableRule.(dbspi.ShardEnumerator)
+			if !ok {
+				return nil, fmt.Errorf("table rule implements ShardCounter but not ShardEnumerator")
+			}
 			for i := 0; i < tableCount; i++ {
-				tableName, err := e.tableRule.ResolveTable(logicalTable, dbspi.IntVal(int64(i)))
+				tableName, err := enumerator.ShardName(logicalTable, i)
 				if err != nil {
-					return nil, fmt.Errorf("resolve table for index %d failed: %w", i, err)
+					return nil, fmt.Errorf("enumerate table shard %d failed: %w", i, err)
 				}
 				targets = append(targets, shardTarget{db: dt.Db, tableName: tableName})
 			}
@@ -369,8 +345,6 @@ func (e *shardedExecutor[T]) FindAll(ctx context.Context, query dbspi.Query, bat
 }
 
 // fetchAllFromShard fetches all matching rows from a single shard.
-// If batchSize > 0, cursor-based pagination is used to avoid deep pagination issues.
-// If batchSize <= 0, all rows are fetched in a single query.
 func (e *shardedExecutor[T]) fetchAllFromShard(ctx context.Context, exec dbspi.Executor[T], query dbspi.Query, batchSize int) ([]T, error) {
 	if batchSize <= 0 {
 		return exec.Find(ctx, query, nil)
@@ -395,7 +369,7 @@ func (e *shardedExecutor[T]) fetchAllFromShard(ctx context.Context, exec dbspi.E
 
 		pagination := NewPaginationConfig().
 			WithLimit(&batchSize).
-			AppendOrder(NewOrderConfig(idColumn, false)) // ORDER BY id ASC
+			AppendOrder(NewOrderConfig(idColumn, false))
 
 		rows, err := exec.Find(ctx, batchQuery, pagination)
 		if err != nil {
@@ -421,7 +395,6 @@ func (e *shardedExecutor[T]) getIdFieldName() string {
 }
 
 // extractFieldValue extracts the value of a column from an entity using reflection.
-// It checks GORM column tags first, then falls back to matching Go field names.
 func extractFieldValue(entity any, columnName string) any {
 	val := reflect.ValueOf(entity)
 	if val.Kind() == reflect.Ptr {
@@ -435,7 +408,6 @@ func extractFieldValue(entity any, columnName string) any {
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 
-		// Check gorm column tag
 		if tag := field.Tag.Get("gorm"); tag != "" {
 			for _, part := range strings.Split(tag, ";") {
 				kv := strings.SplitN(part, ":", 2)
@@ -450,7 +422,6 @@ func extractFieldValue(entity any, columnName string) any {
 			}
 		}
 
-		// Fallback: match Go field name (case-insensitive) or snake_case
 		if strings.EqualFold(field.Name, columnName) || strings.EqualFold(toSnakeCase(field.Name), columnName) {
 			return val.Field(i).Interface()
 		}

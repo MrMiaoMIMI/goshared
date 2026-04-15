@@ -4,106 +4,48 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"hash/fnv"
-	"strconv"
 )
 
 var ErrShardingKeyRequired = errors.New("sharding key is required: " +
 	"use Shard(key) or pass via WithShardingKey(ctx, key)")
 
-// ================== ShardingValue ==================
-
-type shardingValueKind int
-
-const (
-	kindInt64 shardingValueKind = iota
-	kindUint64
-	kindString
-)
-
-// ShardingValue wraps a typed sharding value with support for string
-// conversion (used by named/direct rules) and numeric conversion (used
-// by hash_mod/range rules).
-type ShardingValue struct {
-	intVal  int64
-	uintVal uint64
-	strVal  string
-	kind    shardingValueKind
-}
-
-func IntVal(v int64) ShardingValue   { return ShardingValue{intVal: v, kind: kindInt64} }
-func UintVal(v uint64) ShardingValue { return ShardingValue{uintVal: v, kind: kindUint64} }
-func StrVal(v string) ShardingValue  { return ShardingValue{strVal: v, kind: kindString} }
-
-// String returns a canonical string representation.
-func (sv ShardingValue) String() string {
-	switch sv.kind {
-	case kindInt64:
-		return strconv.FormatInt(sv.intVal, 10)
-	case kindUint64:
-		return strconv.FormatUint(sv.uintVal, 10)
-	case kindString:
-		return sv.strVal
-	}
-	return ""
-}
-
-// ToUint64 converts the value to uint64 for hash-based sharding.
-// String values are hashed via FNV-1a.
-func (sv ShardingValue) ToUint64() (uint64, error) {
-	switch sv.kind {
-	case kindInt64:
-		return uint64(sv.intVal), nil
-	case kindUint64:
-		return sv.uintVal, nil
-	case kindString:
-		h := fnv.New64a()
-		_, _ = h.Write([]byte(sv.strVal))
-		return h.Sum64(), nil
-	}
-	return 0, errors.New("unknown ShardingValue kind")
-}
-
-// ToInt64 converts the value to int64 for range-based sharding.
-func (sv ShardingValue) ToInt64() (int64, error) {
-	switch sv.kind {
-	case kindInt64:
-		return sv.intVal, nil
-	case kindUint64:
-		return int64(sv.uintVal), nil
-	case kindString:
-		return 0, fmt.Errorf("cannot convert string %q to int64", sv.strVal)
-	}
-	return 0, errors.New("unknown ShardingValue kind")
-}
-
 // ================== ShardingKey ==================
 
-// ShardingKey is a composite sharding key that maps DB column names to
-// ShardingValue instances. The column names must match the key_field
-// values configured in DbShardConfig / TableShardConfig.
+// ShardingKey is a composite sharding key that maps column names to values.
+// Values can be int64, int, uint64, or string.
 type ShardingKey struct {
-	fields map[string]ShardingValue
+	fields map[string]any
 }
 
 // NewShardingKey creates an empty ShardingKey.
 func NewShardingKey() *ShardingKey {
-	return &ShardingKey{fields: make(map[string]ShardingValue)}
+	return &ShardingKey{fields: make(map[string]any)}
 }
 
-// Set stores a sharding value under the given Column's name.
-func (sk *ShardingKey) Set(col Column, value ShardingValue) *ShardingKey {
+// Set stores a value under the given Column's name.
+func (sk *ShardingKey) Set(col Column, value any) *ShardingKey {
 	sk.fields[col.Name()] = value
 	return sk
 }
 
-// Get retrieves the ShardingValue for the given DB column name.
-func (sk *ShardingKey) Get(columnName string) (ShardingValue, error) {
-	v, ok := sk.fields[columnName]
+// SetVal stores a value under the given column name.
+func (sk *ShardingKey) SetVal(name string, value any) *ShardingKey {
+	sk.fields[name] = value
+	return sk
+}
+
+// Get retrieves the value for the given column name.
+func (sk *ShardingKey) Get(name string) (any, error) {
+	v, ok := sk.fields[name]
 	if !ok {
-		return ShardingValue{}, fmt.Errorf("sharding key field %q not found", columnName)
+		return nil, fmt.Errorf("sharding key field %q not found", name)
 	}
 	return v, nil
+}
+
+// Fields returns the underlying map (read-only usage intended).
+func (sk *ShardingKey) Fields() map[string]any {
+	return sk.fields
 }
 
 // ================== DbTarget ==================
@@ -117,23 +59,29 @@ type DbTarget struct {
 
 // ================== Sharding Rule Interfaces ==================
 
-// DbShardingRule resolves a ShardingValue to a target key string.
+// DbShardingRule resolves a ShardingKey to a target key string.
 // The returned string is matched against DbTarget.Key to determine which Db to use.
 type DbShardingRule interface {
-	ResolveDbKey(key ShardingValue) (targetKey string, err error)
+	ResolveDbKey(key *ShardingKey) (targetKey string, err error)
 }
 
 // TableShardingRule resolves the physical table name from the logical
-// table name and a ShardingValue.
+// table name and a ShardingKey.
 type TableShardingRule interface {
-	ResolveTable(logicalTable string, key ShardingValue) (string, error)
+	ResolveTable(logicalTable string, key *ShardingKey) (string, error)
 }
 
 // ShardCounter is an optional interface that table sharding rules can
 // implement to declare the total number of shards. Used by FindAll /
-// CountAll to enumerate all physical tables without Enumerable.
+// CountAll to enumerate all physical tables.
 type ShardCounter interface {
 	ShardCount() int
+}
+
+// ShardEnumerator generates the physical table name for a given shard index.
+// Used by scatter-gather (FindAll/CountAll) to enumerate all physical tables.
+type ShardEnumerator interface {
+	ShardName(logicalTable string, index int) (string, error)
 }
 
 // ================== Context helpers ==================

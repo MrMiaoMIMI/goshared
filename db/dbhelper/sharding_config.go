@@ -2,28 +2,15 @@ package dbhelper
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/MrMiaoMIMI/goshared/db/dbspi"
+	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp"
+	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp/expr"
 )
 
 // ShardingConfig provides a declarative configuration for sharded executors.
-// It can be populated from YAML, JSON, or directly in Go code.
 //
-// YAML example (table-only sharding):
-//
-//	server:
-//	  host: 10.0.0.1
-//	  port: 3306
-//	  user: root
-//	  password: secret
-//	  db_name: order_db
-//	table:
-//	  rule: hash_mod
-//	  key_field: shop_id
-//	  count: 10
-//
-// YAML example (db + table sharding on same server):
+// YAML example (region-based DB + table sharding):
 //
 //	server:
 //	  host: 10.0.0.1
@@ -31,16 +18,18 @@ import (
 //	  user: root
 //	  password: secret
 //	db:
-//	  rule: hash_mod
-//	  key_field: shop_id
-//	  count: 4
-//	  prefix: order_db
+//	  name_expr: "order_${region}_db"
+//	  expand_exprs:
+//	    - "${region} := enum(SG, TH, ID)"
+//	    - "${region} = @{region}"
 //	table:
-//	  rule: hash_mod
-//	  key_field: shop_id
-//	  count: 10
+//	  name_expr: "order_tab_${index}"
+//	  expand_exprs:
+//	    - "${idx} := range(0, 1000)"
+//	    - "${idx} = @{shop_id} / 1000 % 1000"
+//	    - "${index} = fill(${idx}, 8)"
 //
-// YAML example (named db sharding, e.g., by region):
+// YAML example (hash-mod pattern):
 //
 //	server:
 //	  host: 10.0.0.1
@@ -48,73 +37,34 @@ import (
 //	  user: root
 //	  password: secret
 //	db:
-//	  rule: named
-//	  key_field: region
-//	  prefix: order_
-//	  suffix: _db
-//	  keys: [SG, TH, ID]
+//	  name_expr: "order_db_${idx}"
+//	  expand_exprs:
+//	    - "${idx} := range(0, 4)"
+//	    - "${idx} = hash(@{shop_id}) % 4"
 //	table:
-//	  rule: hash_mod
-//	  key_field: shop_id
-//	  count: 10
-//
-// YAML example (multi-server):
-//
-//	servers:
-//	  - key: "0"
-//	    host: 10.0.0.1
-//	    port: 3306
-//	    user: root
-//	    password: secret
-//	    db_name: order_db_0
-//	  - key: "1"
-//	    host: 10.0.0.2
-//	    port: 3306
-//	    user: root
-//	    password: secret
-//	    db_name: order_db_1
-//	db:
-//	  rule: hash_mod
-//	  key_field: shop_id
-//	  count: 2
-//	table:
-//	  rule: hash_mod
-//	  key_field: shop_id
-//	  count: 10
+//	  name_expr: "order_tab_${index}"
+//	  expand_exprs:
+//	    - "${idx} := range(0, 1000)"
+//	    - "${idx} = hash(@{shop_id}) % 1000"
+//	    - "${index} = fill(${idx}, 8)"
 type ShardingConfig struct {
 	// Server configures a single database server.
-	// Use this when all databases reside on the same server.
-	// For multi-server setups, use Servers instead.
 	Server *ServerConfig `yaml:"server" json:"server"`
 
 	// Servers configures multiple database servers.
-	// Each entry maps a routing key to a server with a specific database.
 	Servers []NamedServerConfig `yaml:"servers" json:"servers"`
 
-	// Db configures database-level sharding.
-	// Omit for table-only sharding (single database, multiple tables).
-	//
-	// Supported rules:
-	//   - "hash_mod": hash(key) % Count → db index. Requires Count and Prefix.
-	//   - "named": key → key (direct mapping). Requires Prefix, Suffix, and Keys.
-	//   - "range": range-based routing. Requires Prefix and Boundaries.
+	// Db configures database-level sharding via expressions.
 	Db *DbShardConfig `yaml:"db" json:"db"`
 
-	// Table configures table-level sharding.
-	// Omit for db-only sharding (multiple databases, single table per db).
-	//
-	// Supported rules:
-	//   - "hash_mod": hash(key) % Count → table suffix. Requires Count.
+	// Table configures table-level sharding via expressions.
 	Table *TableShardConfig `yaml:"table" json:"table"`
 
-	// MaxConcurrency limits concurrent goroutines for scatter-gather operations
-	// (FindAll / CountAll). 0 means unlimited.
+	// MaxConcurrency limits concurrent goroutines for scatter-gather.
 	MaxConcurrency int `yaml:"max_concurrency" json:"max_concurrency"`
 }
 
 // ServerConfig configures a database server connection.
-// Either set DSN for a single connection string, or use Host/Port/User/Password fields.
-// DSN takes precedence over individual fields.
 type ServerConfig struct {
 	DSN      string `yaml:"dsn" json:"dsn"`
 	Host     string `yaml:"host" json:"host"`
@@ -135,96 +85,57 @@ type NamedServerConfig struct {
 	Key          string `yaml:"key" json:"key"`
 }
 
-// DbShardConfig configures database-level sharding.
+// DbShardConfig configures database-level sharding via expressions.
 type DbShardConfig struct {
-	// Rule specifies the sharding algorithm: "hash_mod", "range", or "named".
-	Rule string `yaml:"rule" json:"rule"`
+	// NameExpr is the name template for the database name.
+	// Only ${var} interpolation is supported. All computation belongs in ExpandExprs.
+	// Example: "order_${region}_db"
+	NameExpr string `yaml:"name_expr" json:"name_expr"`
 
-	// KeyField is the DB column name used to extract the sharding value
-	// from the ShardingKey. Required.
-	KeyField string `yaml:"key_field" json:"key_field"`
-
-	// Count is the number of database shards (for "hash_mod").
-	Count int `yaml:"count" json:"count"`
-
-	// Prefix is the database name prefix.
-	//   hash_mod: generates {Prefix}_{0}, {Prefix}_{1}, ...
-	//   named:    generates {Prefix}{key}{Suffix}
-	//   range:    generates {Prefix}_{0}, {Prefix}_{1}, ...
-	Prefix string `yaml:"prefix" json:"prefix"`
-
-	// Suffix is appended after the key (for "named" rule only).
-	Suffix string `yaml:"suffix" json:"suffix"`
-
-	// Keys lists the explicit routing keys (for "named" rule only).
-	// Each key maps to database "{Prefix}{key}{Suffix}".
-	Keys []string `yaml:"keys" json:"keys"`
-
-	// Boundaries defines range boundaries (for "range" rule only).
-	// Creates len(Boundaries)+1 shards.
-	// Example: [1000, 2000] →
-	//   key < 1000 → shard 0, 1000 <= key < 2000 → shard 1, key >= 2000 → shard 2
-	Boundaries []int64 `yaml:"boundaries" json:"boundaries"`
+	// ExpandExprs are variable declarations and computations.
+	// := for enumeration declarations, = for runtime computations.
+	// Supports @{col} for column refs, ${var} for variables, func() for functions.
+	// Example: ["${region} := enum(SG, TH, ID)", "${region} = @{region}"]
+	ExpandExprs []string `yaml:"expand_exprs" json:"expand_exprs"`
 }
 
-// TableShardConfig configures table-level sharding.
+// TableShardConfig configures table-level sharding via expressions.
 type TableShardConfig struct {
-	// Rule specifies the sharding algorithm: "hash_mod".
-	Rule string `yaml:"rule" json:"rule"`
+	// NameExpr is the name template for the physical table name.
+	// Only ${var} interpolation is supported. All computation belongs in ExpandExprs.
+	// Example: "order_tab_${index}"
+	NameExpr string `yaml:"name_expr" json:"name_expr"`
 
-	// KeyField is the DB column name used to extract the sharding value
-	// from the ShardingKey. Required.
-	KeyField string `yaml:"key_field" json:"key_field"`
-
-	// Count is the number of table shards.
-	Count int `yaml:"count" json:"count"`
-
-	// Format is the suffix format string for table names.
-	// Default: "_%08d" → order_tab_00000000, order_tab_00000001, ...
-	// Example: "_%02d" → order_tab_00, order_tab_01, ...
-	Format string `yaml:"format" json:"format"`
+	// ExpandExprs are variable declarations and computations.
+	// Supports @{col} for column refs, ${var} for variables, func() for functions.
+	// Example: ["${idx} := range(0, 1000)", "${idx} = @{shop_id} % 1000", "${index} = fill(${idx}, 8)"]
+	ExpandExprs []string `yaml:"expand_exprs" json:"expand_exprs"`
 }
 
 // NewShardedExecutorFromConfig creates a sharded executor from declarative configuration.
-// This eliminates the need to manually construct DbTargets, sharding rules, and options.
-//
-// Example (table-only, minimal code):
-//
-//	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
-//	    Server: &dbhelper.ServerConfig{
-//	        Host: "10.0.0.1", Port: 3306, User: "root", Password: "pass", DbName: "order_db",
-//	    },
-//	    Table: &dbhelper.TableShardConfig{Rule: "hash_mod", KeyField: "shop_id", Count: 10},
-//	})
-//
-// Example (db + table sharding):
-//
-//	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
-//	    Server: &dbhelper.ServerConfig{
-//	        Host: "10.0.0.1", Port: 3306, User: "root", Password: "pass",
-//	    },
-//	    Db:    &dbhelper.DbShardConfig{Rule: "hash_mod", KeyField: "shop_id", Count: 4, Prefix: "order_db"},
-//	    Table: &dbhelper.TableShardConfig{Rule: "hash_mod", KeyField: "shop_id", Count: 10},
-//	})
 func NewShardedExecutorFromConfig[T dbspi.Entity](entity T, cfg ShardingConfig) dbspi.Executor[T] {
 	var opts []ShardOption
 
-	opts = append(opts, WithDbs(buildDbTargets(cfg)))
+	dbs, err := buildDbTargets(cfg)
+	if err != nil {
+		panic(fmt.Sprintf("sharding config: build db targets: %v", err))
+	}
+	opts = append(opts, WithDbs(dbs))
 
-	if rule := buildDbRule(cfg.Db); rule != nil {
+	if cfg.Db != nil {
+		rule, err := buildDbRule(cfg.Db)
+		if err != nil {
+			panic(fmt.Sprintf("sharding config: build db rule: %v", err))
+		}
 		opts = append(opts, WithDbRule(rule))
 	}
 
-	if rule := buildTableRule(cfg.Table); rule != nil {
+	if cfg.Table != nil {
+		rule, err := buildTableRule(cfg.Table)
+		if err != nil {
+			panic(fmt.Sprintf("sharding config: build table rule: %v", err))
+		}
 		opts = append(opts, WithTableRule(rule))
-	}
-
-	if cfg.Db != nil && cfg.Db.KeyField != "" {
-		opts = append(opts, WithDbKeyField(cfg.Db.KeyField))
-	}
-
-	if cfg.Table != nil && cfg.Table.KeyField != "" {
-		opts = append(opts, WithTableKeyField(cfg.Table.KeyField))
 	}
 
 	if cfg.MaxConcurrency > 0 {
@@ -259,7 +170,8 @@ func newDbFromServer(server ServerConfig, dbName string) dbspi.Db {
 	return NewDb(NewDbConfig(server.Host, server.Port, server.User, server.Password, dbName, opts...))
 }
 
-func buildDbTargets(cfg ShardingConfig) []dbspi.DbTarget {
+func buildDbTargets(cfg ShardingConfig) ([]dbspi.DbTarget, error) {
+	// Multi-server mode
 	if len(cfg.Servers) > 0 {
 		targets := make([]dbspi.DbTarget, len(cfg.Servers))
 		for i, s := range cfg.Servers {
@@ -268,84 +180,112 @@ func buildDbTargets(cfg ShardingConfig) []dbspi.DbTarget {
 				Db:  newDbFromServer(s.ServerConfig, s.DbName),
 			}
 		}
-		return targets
+		return targets, nil
 	}
 
 	if cfg.Server == nil {
-		panic("sharding config requires either Server or Servers")
+		return nil, fmt.Errorf("sharding config requires either Server or Servers")
 	}
 
-	if cfg.Db != nil {
-		switch cfg.Db.Rule {
-		case "hash_mod":
-			targets := make([]dbspi.DbTarget, cfg.Db.Count)
-			for i := 0; i < cfg.Db.Count; i++ {
-				dbName := fmt.Sprintf("%s_%d", cfg.Db.Prefix, i)
-				targets[i] = dbspi.DbTarget{
-					Key: strconv.Itoa(i),
-					Db:  newDbFromServer(*cfg.Server, dbName),
-				}
-			}
-			return targets
-
-		case "named":
-			targets := make([]dbspi.DbTarget, len(cfg.Db.Keys))
-			for i, key := range cfg.Db.Keys {
-				dbName := cfg.Db.Prefix + key + cfg.Db.Suffix
-				targets[i] = dbspi.DbTarget{
-					Key: key,
-					Db:  newDbFromServer(*cfg.Server, dbName),
-				}
-			}
-			return targets
-
-		case "range":
-			count := len(cfg.Db.Boundaries) + 1
-			targets := make([]dbspi.DbTarget, count)
-			for i := 0; i < count; i++ {
-				dbName := fmt.Sprintf("%s_%d", cfg.Db.Prefix, i)
-				targets[i] = dbspi.DbTarget{
-					Key: strconv.Itoa(i),
-					Db:  newDbFromServer(*cfg.Server, dbName),
-				}
-			}
-			return targets
-
-		default:
-			panic(fmt.Sprintf("unsupported db sharding rule: %q", cfg.Db.Rule))
+	// Expression-based DB sharding: enumerate all db names
+	if cfg.Db != nil && cfg.Db.NameExpr != "" {
+		tmpl, err := expr.ParseTemplate(cfg.Db.NameExpr)
+		if err != nil {
+			return nil, fmt.Errorf("parse db name_expr: %w", err)
 		}
+		expands, err := expr.ParseExpands(cfg.Db.ExpandExprs)
+		if err != nil {
+			return nil, fmt.Errorf("parse db expand_exprs: %w", err)
+		}
+
+		// Auto-infer identity computations for ${var} refs in template
+		autoInferIdentityComputes(tmpl, expands)
+
+		rule := dbsp.NewExprDbRule(tmpl, expands)
+		dbNames, err := rule.EnumerateDbNames()
+		if err != nil {
+			return nil, fmt.Errorf("enumerate db names: %w", err)
+		}
+
+		targets := make([]dbspi.DbTarget, len(dbNames))
+		for i, name := range dbNames {
+			targets[i] = dbspi.DbTarget{
+				Key: name,
+				Db:  newDbFromServer(*cfg.Server, name),
+			}
+		}
+		return targets, nil
 	}
 
-	return SingleDb(newDbFromServer(*cfg.Server, cfg.Server.DbName))
+	// No db sharding: single database
+	return SingleDb(newDbFromServer(*cfg.Server, cfg.Server.DbName)), nil
 }
 
-func buildDbRule(cfg *DbShardConfig) dbspi.DbShardingRule {
-	if cfg == nil {
-		return nil
+func buildDbRule(cfg *DbShardConfig) (dbspi.DbShardingRule, error) {
+	if cfg == nil || cfg.NameExpr == "" {
+		return nil, nil
 	}
-	switch cfg.Rule {
-	case "hash_mod":
-		return NewHashModDbRule(cfg.Count)
-	case "named":
-		return NewDirectDbRule()
-	case "range":
-		return NewRangeDbRule(cfg.Boundaries)
-	default:
-		panic(fmt.Sprintf("unsupported db sharding rule: %q", cfg.Rule))
+
+	tmpl, err := expr.ParseTemplate(cfg.NameExpr)
+	if err != nil {
+		return nil, fmt.Errorf("parse db name_expr: %w", err)
 	}
+	expands, err := expr.ParseExpands(cfg.ExpandExprs)
+	if err != nil {
+		return nil, fmt.Errorf("parse db expand_exprs: %w", err)
+	}
+
+	autoInferIdentityComputes(tmpl, expands)
+
+	return dbsp.NewExprDbRule(tmpl, expands), nil
 }
 
-func buildTableRule(cfg *TableShardConfig) dbspi.TableShardingRule {
-	if cfg == nil {
-		return nil
+func buildTableRule(cfg *TableShardConfig) (dbspi.TableShardingRule, error) {
+	if cfg == nil || cfg.NameExpr == "" {
+		return nil, nil
 	}
-	switch cfg.Rule {
-	case "hash_mod":
-		if cfg.Format != "" {
-			return NewHashModTableRuleWithFormat(cfg.Count, cfg.Format)
+
+	tmpl, err := expr.ParseTemplate(cfg.NameExpr)
+	if err != nil {
+		return nil, fmt.Errorf("parse table name_expr: %w", err)
+	}
+	expands, err := expr.ParseExpands(cfg.ExpandExprs)
+	if err != nil {
+		return nil, fmt.Errorf("parse table expand_exprs: %w", err)
+	}
+
+	return dbsp.NewExprTableRule(tmpl, expands)
+}
+
+// autoInferIdentityComputes checks if a ${var} in the template matches a := declaration
+// but has no corresponding = computation. If so, it auto-generates "${var} = @{var}"
+// as an identity computation (passthrough from column to variable).
+func autoInferIdentityComputes(tmpl *expr.Template, expands *expr.ExpandSet) {
+	varRefs := tmpl.CollectVarRefs()
+	if len(varRefs) == 0 {
+		return
+	}
+
+	declaredVars := make(map[string]bool)
+	for _, d := range expands.Decls {
+		declaredVars[d.VarName] = true
+	}
+
+	computedVars := make(map[string]bool)
+	for _, c := range expands.Computes {
+		computedVars[c.VarName] = true
+	}
+
+	for _, varName := range varRefs {
+		if declaredVars[varName] && !computedVars[varName] {
+			identityExpr, err := expr.ParseExpressionString("@{" + varName + "}")
+			if err != nil {
+				panic(fmt.Sprintf("autoInferIdentityComputes: failed to parse identity expr for %q: %v", varName, err))
+			}
+			expands.Computes = append(expands.Computes, &expr.ExpandCompute{
+				VarName: varName,
+				Expr:    identityExpr,
+			})
 		}
-		return NewHashModTableRule(cfg.Count)
-	default:
-		panic(fmt.Sprintf("unsupported table sharding rule: %q", cfg.Rule))
 	}
 }

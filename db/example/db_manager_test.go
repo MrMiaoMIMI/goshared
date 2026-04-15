@@ -95,17 +95,20 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 			"order_dbs": {
 				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
 				DbSharding: &dbhelper.DbShardConfig{
-					Rule: "hash_mod", KeyField: "shop_id", Count: 4, Prefix: "order_db",
+					NameExpr:    "order_db_${idx}",
+					ExpandExprs: []string{"${idx} := range(0, 4)", "${idx} = hash(@{shop_id}) % 4"},
 				},
 				TableSharding: &dbhelper.TableShardConfig{
-					Rule: "hash_mod", KeyField: "shop_id", Count: 10,
+					NameExpr:    "order_tab_${index}",
+					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
 				},
 				MaxConcurrency: 5,
 				EntityRules: []dbhelper.EntityRule{
 					{
 						Tables: []string{"order_detail_tab"},
 						TableSharding: &dbhelper.TableShardConfig{
-							Rule: "hash_mod", KeyField: "shop_id", Count: 20,
+							NameExpr:    "order_detail_tab_${index}",
+							ExpandExprs: []string{"${idx} := range(0, 20)", "${idx} = hash(@{shop_id}) % 20", "${index} = fill(${idx}, 8)"},
 						},
 					},
 				},
@@ -117,7 +120,7 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 	itemExec := dbhelper.For(&OrderItem{}, mgr)
 	detailExec := dbhelper.For(&OrderDetail{}, mgr)
 
-	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, dbspi.IntVal(12345))
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	orders, err := orderExec.Find(ctx, nil, nil)
@@ -142,14 +145,12 @@ func Test_DbManager_NamedDbSharding(t *testing.T) {
 			"order_dbs": {
 				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
 				DbSharding: &dbhelper.DbShardConfig{
-					Rule:     "named",
-					KeyField: "region",
-					Prefix:   "order_",
-					Suffix:   "_db",
-					Keys:     []string{"SG", "TH", "ID"},
+					NameExpr:    "order_${region}_db",
+					ExpandExprs: []string{"${region} := enum(SG, TH, ID)", "${region} = @{region}"},
 				},
 				TableSharding: &dbhelper.TableShardConfig{
-					Rule: "hash_mod", KeyField: "shop_id", Count: 10,
+					NameExpr:    "order_tab_${index}",
+					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
 				},
 			},
 		},
@@ -158,8 +159,8 @@ func Test_DbManager_NamedDbSharding(t *testing.T) {
 	orderExec := dbhelper.For(&Order{}, mgr)
 
 	sk := dbspi.NewShardingKey().
-		Set(OrderFields.Region, dbspi.StrVal("SG")).
-		Set(OrderFields.ShopID, dbspi.IntVal(12345))
+		Set(OrderFields.Region, "SG").
+		Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 	orders, err := orderExec.Find(ctx, nil, nil)
 	t.Logf("Named db sharding (SG): orders=%v, err=%v", orders, err)
@@ -177,10 +178,12 @@ func Test_DbManager_GlobalDefault(t *testing.T) {
 			"order_dbs": {
 				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
 				DbSharding: &dbhelper.DbShardConfig{
-					Rule: "hash_mod", KeyField: "shop_id", Count: 4, Prefix: "order_db",
+					NameExpr:    "order_db_${idx}",
+					ExpandExprs: []string{"${idx} := range(0, 4)", "${idx} = hash(@{shop_id}) % 4"},
 				},
 				TableSharding: &dbhelper.TableShardConfig{
-					Rule: "hash_mod", KeyField: "shop_id", Count: 10,
+					NameExpr:    "order_tab_${index}",
+					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
 				},
 			},
 		},
@@ -195,7 +198,7 @@ func Test_DbManager_GlobalDefault(t *testing.T) {
 	users, err := userExec.Find(ctx, nil, nil)
 	t.Logf("Global default - User: users=%v, err=%v", users, err)
 
-	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, dbspi.IntVal(12345))
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx = dbspi.WithShardingKey(ctx, sk)
 	orders, err := orderExec.Find(ctx, nil, nil)
 	t.Logf("Global default - Order: orders=%v, err=%v", orders, err)

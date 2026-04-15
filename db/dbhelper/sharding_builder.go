@@ -5,29 +5,32 @@ import (
 )
 
 // ShardedBuilder provides a fluent API for constructing sharded executors.
-// It builds a ShardingConfig internally and delegates to NewShardedExecutorFromConfig.
 //
-// Example (table-only sharding — most common):
+// Example (region-based DB + table sharding):
+//
+//	executor := dbhelper.Sharded(&Order{}).
+//	    Server("10.0.0.1", 3306, "root", "pass").
+//	    ExprDb("order_${region}_db",
+//	        "${region} := enum(SG, TH, ID)",
+//	        "${region} = @{region}",
+//	    ).
+//	    ExprTable("order_tab_${index}",
+//	        "${idx} := range(0, 1000)",
+//	        "${idx2} = @{shop_id} / 1000",
+//	        "${idx} = ${idx2} % 1000",
+//	        "${index} = fill(${idx}, 8)",
+//	    ).
+//	    Build()
+//
+// Example (table-only sharding):
 //
 //	executor := dbhelper.Sharded(&Order{}).
 //	    Server("10.0.0.1", 3306, "root", "pass", "order_db").
-//	    HashModTable("shop_id", 10).
-//	    Build()
-//
-// Example (db + table sharding):
-//
-//	executor := dbhelper.Sharded(&Order{}).
-//	    Server("10.0.0.1", 3306, "root", "pass").
-//	    HashModDb("shop_id", "order_db", 4).
-//	    HashModTable("shop_id", 10).
-//	    Build()
-//
-// Example (named db sharding by region):
-//
-//	executor := dbhelper.Sharded(&Order{}).
-//	    Server("10.0.0.1", 3306, "root", "pass").
-//	    NamedDbs("region", "order_", "_db", "SG", "TH", "ID").
-//	    HashModTable("shop_id", 10).
+//	    ExprTable("order_tab_${index}",
+//	        "${idx} := range(0, 100)",
+//	        "${idx} = @{shop_id} % 100",
+//	        "${index} = fill(${idx}, 4)",
+//	    ).
 //	    Build()
 type ShardedBuilder[T dbspi.Entity] struct {
 	entity T
@@ -41,7 +44,7 @@ func Sharded[T dbspi.Entity](entity T) *ShardedBuilder[T] {
 
 // Server sets the database server connection.
 // For table-only sharding, provide the database name as the last argument.
-// For db sharding, omit the database name (it comes from HashModDb/NamedDbs/RangeDb).
+// For db sharding, omit the database name (it comes from the expression).
 func (b *ShardedBuilder[T]) Server(host string, port uint, user, password string, dbName ...string) *ShardedBuilder[T] {
 	b.cfg.Server = &ServerConfig{
 		Host:     host,
@@ -56,7 +59,6 @@ func (b *ShardedBuilder[T]) Server(host string, port uint, user, password string
 }
 
 // AddServer adds a database server for multi-server sharding.
-// key is the routing key string that matches the db sharding rule output.
 func (b *ShardedBuilder[T]) AddServer(key string, host string, port uint, user, password, dbName string) *ShardedBuilder[T] {
 	b.cfg.Servers = append(b.cfg.Servers, NamedServerConfig{
 		ServerConfig: ServerConfig{
@@ -72,7 +74,6 @@ func (b *ShardedBuilder[T]) AddServer(key string, host string, port uint, user, 
 }
 
 // Debug enables GORM debug logging for all connections.
-// Must be called after Server() or AddServer().
 func (b *ShardedBuilder[T]) Debug() *ShardedBuilder[T] {
 	if b.cfg.Server != nil {
 		b.cfg.Server.Debug = true
@@ -84,7 +85,6 @@ func (b *ShardedBuilder[T]) Debug() *ShardedBuilder[T] {
 }
 
 // ConnPool configures the connection pool for all connections.
-// Must be called after Server() or AddServer().
 func (b *ShardedBuilder[T]) ConnPool(maxOpen, maxIdle, lifetimeSec int) *ShardedBuilder[T] {
 	if b.cfg.Server != nil {
 		b.cfg.Server.MaxOpenConns = maxOpen
@@ -99,98 +99,33 @@ func (b *ShardedBuilder[T]) ConnPool(maxOpen, maxIdle, lifetimeSec int) *Sharded
 	return b
 }
 
-// HashModDb configures hash-mod database sharding on a single server.
-// keyField is the DB column name for extracting the sharding value.
-// Generates db names: {prefix}_0, {prefix}_1, ..., {prefix}_{count-1}.
+// ExprDb configures expression-based database sharding.
 //
-// Example:
-//
-//	.HashModDb("shop_id", "order_db", 4)
-//	// Creates databases: order_db_0, order_db_1, order_db_2, order_db_3
-func (b *ShardedBuilder[T]) HashModDb(keyField, prefix string, count int) *ShardedBuilder[T] {
+// nameExpr is the name template using only ${var} references (e.g., "order_${region}_db").
+// expandExprs are variable declarations and computations (e.g.,
+// "${region} := enum(SG, TH, ID)", "${region} = @{region}").
+func (b *ShardedBuilder[T]) ExprDb(nameExpr string, expandExprs ...string) *ShardedBuilder[T] {
 	b.cfg.Db = &DbShardConfig{
-		Rule:     "hash_mod",
-		KeyField: keyField,
-		Count:    count,
-		Prefix:   prefix,
+		NameExpr:    nameExpr,
+		ExpandExprs: expandExprs,
 	}
 	return b
 }
 
-// NamedDbs configures named database sharding on a single server.
-// keyField is the DB column name for extracting the sharding value.
-// Generates db names: {prefix}{key}{suffix} for each key.
+// ExprTable configures expression-based table sharding.
 //
-// Example:
-//
-//	.NamedDbs("region", "order_", "_db", "SG", "TH", "ID")
-//	// Creates databases: order_SG_db, order_TH_db, order_ID_db
-//	// ShardingKey with region="SG" → routes to order_SG_db
-func (b *ShardedBuilder[T]) NamedDbs(keyField, prefix, suffix string, keys ...string) *ShardedBuilder[T] {
-	b.cfg.Db = &DbShardConfig{
-		Rule:     "named",
-		KeyField: keyField,
-		Prefix:   prefix,
-		Suffix:   suffix,
-		Keys:     keys,
-	}
-	return b
-}
-
-// RangeDb configures range-based database sharding on a single server.
-// keyField is the DB column name for extracting the sharding value.
-// Generates db names: {prefix}_0, {prefix}_1, ..., {prefix}_{len(boundaries)}.
-//
-// Example:
-//
-//	.RangeDb("shop_id", "order_db", 1000, 2000)
-//	// key < 1000 → order_db_0, 1000 <= key < 2000 → order_db_1, key >= 2000 → order_db_2
-func (b *ShardedBuilder[T]) RangeDb(keyField, prefix string, boundaries ...int64) *ShardedBuilder[T] {
-	b.cfg.Db = &DbShardConfig{
-		Rule:       "range",
-		KeyField:   keyField,
-		Prefix:     prefix,
-		Boundaries: boundaries,
-	}
-	return b
-}
-
-// HashModTable configures hash-mod table sharding.
-// keyField is the DB column name for extracting the sharding value.
-// Physical table name = entity.TableName() + "_%08d".
-//
-// Example:
-//
-//	.HashModTable("shop_id", 10)
-//	// order_tab → order_tab_00000000, order_tab_00000001, ..., order_tab_00000009
-func (b *ShardedBuilder[T]) HashModTable(keyField string, count int) *ShardedBuilder[T] {
+// nameExpr is the name template using only ${var} references (e.g., "order_tab_${index}").
+// expandExprs are variable declarations and computations (e.g.,
+// "${idx} := range(0, 1000)", "${idx} = @{shop_id} % 1000", "${index} = fill(${idx}, 8)").
+func (b *ShardedBuilder[T]) ExprTable(nameExpr string, expandExprs ...string) *ShardedBuilder[T] {
 	b.cfg.Table = &TableShardConfig{
-		Rule:     "hash_mod",
-		KeyField: keyField,
-		Count:    count,
+		NameExpr:    nameExpr,
+		ExpandExprs: expandExprs,
 	}
 	return b
 }
 
-// HashModTableWithFormat configures hash-mod table sharding with a custom suffix format.
-// keyField is the DB column name for extracting the sharding value.
-//
-// Example:
-//
-//	.HashModTableWithFormat("shop_id", 10, "_%02d")
-//	// order_tab → order_tab_00, order_tab_01, ..., order_tab_09
-func (b *ShardedBuilder[T]) HashModTableWithFormat(keyField string, count int, format string) *ShardedBuilder[T] {
-	b.cfg.Table = &TableShardConfig{
-		Rule:     "hash_mod",
-		KeyField: keyField,
-		Count:    count,
-		Format:   format,
-	}
-	return b
-}
-
-// MaxConcurrency limits concurrent goroutines for scatter-gather operations
-// (FindAll / CountAll). 0 means unlimited.
+// MaxConcurrency limits concurrent goroutines for scatter-gather operations.
 func (b *ShardedBuilder[T]) MaxConcurrency(n int) *ShardedBuilder[T] {
 	b.cfg.MaxConcurrency = n
 	return b

@@ -43,6 +43,11 @@ func WithConnMaxLifetimeSeconds(s int) DbConfigOption { return dbsp.WithConnMaxL
 // WithDebugMode enables or disables GORM debug logging.
 func WithDebugMode(debug bool) DbConfigOption { return dbsp.WithDebugMode(debug) }
 
+// NewColumn creates a simple Column reference for use with ShardingKey.Set.
+func NewColumn(name string) dbspi.Column {
+	return dbsp.NewColumn(name)
+}
+
 // NewField creates a T type field, used for query and update
 func NewField[T any](columnName string) dbspi.Field[T] {
 	return dbsp.NewField[T](columnName)

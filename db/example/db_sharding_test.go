@@ -2,7 +2,6 @@ package example
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/MrMiaoMIMI/goshared/db/dbhelper"
@@ -58,11 +57,15 @@ func Test_Sharding_TableOnly_WithShard(t *testing.T) {
 
 	executor := dbhelper.NewShardedExecutor(&Order{},
 		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewHashModTableRule(10)),
-		dbhelper.WithTableKeyField("shop_id"),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = hash(@{shop_id}) % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
 	)
 
-	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, dbspi.IntVal(12345))
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 
 	shardedExec, err := executor.Shard(sk)
 	if err != nil {
@@ -86,11 +89,15 @@ func Test_Sharding_TableOnly_WithCtx(t *testing.T) {
 
 	executor := dbhelper.NewShardedExecutor(&Order{},
 		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewHashModTableRule(8)),
-		dbhelper.WithTableKeyField("shop_id"),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 8)",
+			"${idx} = hash(@{shop_id}) % 8",
+			"${index} = fill(${idx}, 8)",
+		)),
 	)
 
-	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, dbspi.IntVal(12345))
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	order, err := executor.GetById(ctx, 1001)
@@ -110,8 +117,12 @@ func Test_Sharding_MissingKey(t *testing.T) {
 
 	executor := dbhelper.NewShardedExecutor(&Order{},
 		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewHashModTableRule(8)),
-		dbhelper.WithTableKeyField("shop_id"),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 8)",
+			"${idx} = hash(@{shop_id}) % 8",
+			"${index} = fill(${idx}, 8)",
+		)),
 	)
 
 	ctx := context.Background()
@@ -126,8 +137,12 @@ func Test_Sharding_FindAll(t *testing.T) {
 
 	executor := dbhelper.NewShardedExecutor(&Order{},
 		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewHashModTableRule(10)),
-		dbhelper.WithTableKeyField("shop_id"),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = hash(@{shop_id}) % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
 	)
 
 	ctx := context.Background()
@@ -150,82 +165,56 @@ func Test_Sharding_DbAndTable(t *testing.T) {
 
 	executor := dbhelper.NewShardedExecutor(&Order{},
 		dbhelper.WithDbs(dbhelper.IndexedDbs(db0, db1)),
-		dbhelper.WithDbRule(dbhelper.NewHashModDbRule(2)),
-		dbhelper.WithDbKeyField("shop_id"),
-		dbhelper.WithTableRule(dbhelper.NewHashModTableRule(10)),
-		dbhelper.WithTableKeyField("shop_id"),
+		dbhelper.WithDbRule(dbhelper.NewExprDbRule(
+			"${idx}",
+			"${idx} := range(0, 2)",
+			"${idx} = hash(@{shop_id}) % 2",
+		)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = hash(@{shop_id}) % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
 	)
 
-	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, dbspi.IntVal(12345))
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	order, err := executor.GetById(ctx, 1)
 	t.Logf("Example 5: Db+Table sharding: order=%v, err=%v", order, err)
 }
 
-// ==================== Example 6: Custom table sharding (by date) ====================
+// ==================== Example 6: Region-based DB sharding ====================
 
-func Test_Sharding_CustomTableRule(t *testing.T) {
-	db := testNewDb()
-
-	dateCol := dbhelper.NewColumn("date")
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewCustomTableRule(
-			func(logicalTable string, key dbspi.ShardingValue) (string, error) {
-				return fmt.Sprintf("%s_%s", logicalTable, key.String()), nil
-			},
-		)),
-		dbhelper.WithTableKeyField("date"),
-	)
-
-	sk := dbspi.NewShardingKey().Set(dateCol, dbspi.StrVal("20260413"))
-	shardedExec, err := executor.Shard(sk)
-	if err != nil {
-		t.Fatalf("Shard failed: %v", err)
-	}
-	orders, err := shardedExec.Find(context.Background(), nil, nil)
-	t.Logf("Example 6: Custom table rule (by date): orders=%v, err=%v", orders, err)
-}
-
-// ==================== Example 7: Custom db sharding (by country) ====================
-
-func Test_Sharding_CustomDbRule(t *testing.T) {
-	dbSEA := testNewDb()
-	dbTW := testNewDb()
+func Test_Sharding_RegionDb(t *testing.T) {
+	dbSG := testNewDb()
+	dbTH := testNewDb()
 
 	executor := dbhelper.NewShardedExecutor(&Order{},
 		dbhelper.WithDbs(dbhelper.NamedDbs(map[string]dbspi.Db{
-			"SEA": dbSEA,
-			"TW":  dbTW,
+			"order_SG_db": dbSG,
+			"order_TH_db": dbTH,
 		})),
-		dbhelper.WithDbRule(dbhelper.NewCustomDbRule(func(key dbspi.ShardingValue) (string, error) {
-			country := key.String()
-			switch country {
-			case "SG", "MY", "PH":
-				return "SEA", nil
-			case "TW":
-				return "TW", nil
-			default:
-				return "", fmt.Errorf("unknown country: %s", country)
-			}
-		})),
-		dbhelper.WithDbKeyField("region"),
+		dbhelper.WithDbRule(dbhelper.NewExprDbRule(
+			"order_${region}_db",
+			"${region} := enum(SG, TH)",
+			"${region} = @{region}",
+		)),
 	)
 
-	sk := dbspi.NewShardingKey().Set(OrderFields.Region, dbspi.StrVal("SG"))
+	sk := dbspi.NewShardingKey().Set(OrderFields.Region, "SG")
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 	orders, err := executor.Find(ctx, nil, nil)
-	t.Logf("Example 7a: Custom db rule (SG → SEA): orders=%v, err=%v", orders, err)
+	t.Logf("Example 6a: Region DB (SG): orders=%v, err=%v", orders, err)
 
-	sk = dbspi.NewShardingKey().Set(OrderFields.Region, dbspi.StrVal("TW"))
+	sk = dbspi.NewShardingKey().Set(OrderFields.Region, "TH")
 	ctx = dbspi.WithShardingKey(context.Background(), sk)
 	orders, err = executor.Find(ctx, nil, nil)
-	t.Logf("Example 7b: Custom db rule (TW): orders=%v, err=%v", orders, err)
+	t.Logf("Example 6b: Region DB (TH): orders=%v, err=%v", orders, err)
 }
 
-// ==================== Example 8: Non-sharded executor ====================
+// ==================== Example 7: Non-sharded executor ====================
 
 func Test_Sharding_NonShardedExecutor(t *testing.T) {
 	db := testNewDb()
@@ -235,16 +224,16 @@ func Test_Sharding_NonShardedExecutor(t *testing.T) {
 	ctx := context.Background()
 
 	sameExec, err := executor.Shard(nil)
-	t.Logf("Example 8a: Shard() on non-sharded: err=%v (should be nil)", err)
+	t.Logf("Example 7a: Shard() on non-sharded: err=%v (should be nil)", err)
 
 	users, err := sameExec.Find(ctx, nil, nil)
-	t.Logf("Example 8b: Find via Shard() on non-sharded: users=%v, err=%v", users, err)
+	t.Logf("Example 7b: Find via Shard() on non-sharded: users=%v, err=%v", users, err)
 
 	allUsers, err := executor.FindAll(ctx, nil, 0)
-	t.Logf("Example 8c: FindAll on non-sharded: users=%v, err=%v", allUsers, err)
+	t.Logf("Example 7c: FindAll on non-sharded: users=%v, err=%v", allUsers, err)
 }
 
-// ==================== Example 9: Composite sharding key (db + table use different fields) ====================
+// ==================== Example 8: Composite sharding key (db + table use different fields) ====================
 
 func Test_Sharding_CompositeKey(t *testing.T) {
 	dbSG := testNewDb()
@@ -255,17 +244,24 @@ func Test_Sharding_CompositeKey(t *testing.T) {
 			"SG": dbSG,
 			"TH": dbTH,
 		})),
-		dbhelper.WithDbRule(dbhelper.NewDirectDbRule()),
-		dbhelper.WithDbKeyField("region"),
-		dbhelper.WithTableRule(dbhelper.NewHashModTableRule(10)),
-		dbhelper.WithTableKeyField("shop_id"),
+		dbhelper.WithDbRule(dbhelper.NewExprDbRule(
+			"${region}",
+			"${region} := enum(SG, TH)",
+			"${region} = @{region}",
+		)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = hash(@{shop_id}) % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
 	)
 
 	sk := dbspi.NewShardingKey().
-		Set(OrderFields.Region, dbspi.StrVal("SG")).
-		Set(OrderFields.ShopID, dbspi.IntVal(12345))
+		Set(OrderFields.Region, "SG").
+		Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	orders, err := executor.Find(ctx, nil, nil)
-	t.Logf("Example 9: Composite key (region=SG, shop_id=12345): orders=%v, err=%v", orders, err)
+	t.Logf("Example 8: Composite key (region=SG, shop_id=12345): orders=%v, err=%v", orders, err)
 }
