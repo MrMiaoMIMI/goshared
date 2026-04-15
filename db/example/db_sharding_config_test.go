@@ -44,22 +44,13 @@ import (
 //
 // ================================================================
 
-const (
-	dbUserName  = "root"
-	dbPassword  = "123456"
-	dbHost      = "127.0.0.1"
-	dbPort      = 3306
-	orderDbName = "order_db"
-	debugMode   = true
-)
-
 // ==================== Config-driven Examples ====================
 
 func Test_Config_TableOnly(t *testing.T) {
 	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
 		Server: &dbhelper.ServerConfig{
-			Host: dbHost, Port: dbPort, User: dbUserName, Password: dbPassword,
-			DbName: orderDbName, Debug: true,
+			Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+			DbName: testOrderDbName, Debug: testDebugMode,
 		},
 		Table: &dbhelper.TableShardConfig{
 			NameExpr:    "order_tab_${index}",
@@ -76,16 +67,16 @@ func Test_Config_TableOnly(t *testing.T) {
 func Test_Config_DbAndTable(t *testing.T) {
 	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
 		Server: &dbhelper.ServerConfig{
-			Host: dbHost, Port: dbPort, User: dbUserName, Password: dbPassword,
-			DbName: orderDbName, Debug: true,
+			Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+			DbName: testOrderDbName, Debug: testDebugMode,
 		},
 		Db: &dbhelper.DbShardConfig{
 			NameExpr:    "order_db_${idx}",
-			ExpandExprs: []string{"${idx} := range(0, 4)", "${idx} = hash(@{shop_id}) % 4"},
+			ExpandExprs: []string{"${idx} := range(0, 4)", "${idx} = @{shop_id} % 4"},
 		},
 		Table: &dbhelper.TableShardConfig{
 			NameExpr:    "order_tab_${index}",
-			ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
+			ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 		},
 	})
 
@@ -98,7 +89,7 @@ func Test_Config_DbAndTable(t *testing.T) {
 func Test_Config_NamedDbs(t *testing.T) {
 	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
 		Server: &dbhelper.ServerConfig{
-			Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+			Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 		},
 		Db: &dbhelper.DbShardConfig{
 			NameExpr:    "order_${region}_db",
@@ -121,8 +112,8 @@ func Test_Config_NamedDbs(t *testing.T) {
 func Test_Config_MultiServer(t *testing.T) {
 	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
 		Servers: []dbhelper.NamedServerConfig{
-			{Key: "0", ServerConfig: dbhelper.ServerConfig{Host: "10.0.0.1", Port: 3306, User: "root", Password: "pass", DbName: "order_db_0"}},
-			{Key: "1", ServerConfig: dbhelper.ServerConfig{Host: "10.0.0.2", Port: 3306, User: "root", Password: "pass", DbName: "order_db_1"}},
+			{Key: "0", ServerConfig: dbhelper.ServerConfig{Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword, DbName: "order_db_0"}},
+			{Key: "1", ServerConfig: dbhelper.ServerConfig{Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword, DbName: "order_db_1"}},
 		},
 		Db: &dbhelper.DbShardConfig{
 			NameExpr:    "${idx}",
@@ -143,12 +134,12 @@ func Test_Config_MultiServer(t *testing.T) {
 func Test_Config_WithConnPool(t *testing.T) {
 	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
 		Server: &dbhelper.ServerConfig{
-			Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
-			DbName:                 "order_db",
+			Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+			DbName:                 testOrderDbName,
 			MaxOpenConns:           200,
 			MaxIdleConns:           20,
 			ConnMaxLifetimeSeconds: 1800,
-			Debug:                  true,
+			Debug:                  testDebugMode,
 		},
 		Table: &dbhelper.TableShardConfig{
 			NameExpr:    "order_tab_${index}",
@@ -166,7 +157,7 @@ func Test_Config_WithConnPool(t *testing.T) {
 
 func Test_Builder_TableOnly(t *testing.T) {
 	executor := dbhelper.Sharded(&Order{}).
-		Server("127.0.0.1", 3306, "root", "pass", "order_db").
+		Server(testDbHost, testDbPort, testDbUser, testDbPassword, testOrderDbName).
 		ExprTable("order_tab_${index}",
 			"${idx} := range(0, 10)",
 			"${idx} = hash(@{shop_id}) % 10",
@@ -182,7 +173,7 @@ func Test_Builder_TableOnly(t *testing.T) {
 
 func Test_Builder_DbAndTable(t *testing.T) {
 	executor := dbhelper.Sharded(&Order{}).
-		Server("127.0.0.1", 3306, "root", "pass").
+		Server(testDbHost, testDbPort, testDbUser, testDbPassword).
 		ExprDb("order_db_${idx}",
 			"${idx} := range(0, 4)",
 			"${idx} = hash(@{shop_id}) % 4",
@@ -202,7 +193,7 @@ func Test_Builder_DbAndTable(t *testing.T) {
 
 func Test_Builder_NamedDbs(t *testing.T) {
 	executor := dbhelper.Sharded(&Order{}).
-		Server("127.0.0.1", 3306, "root", "pass").
+		Server(testDbHost, testDbPort, testDbUser, testDbPassword).
 		ExprDb("order_${region}_db",
 			"${region} := enum(SG, TH, ID)",
 			"${region} = @{region}",
@@ -224,7 +215,7 @@ func Test_Builder_NamedDbs(t *testing.T) {
 
 func Test_Builder_WithOptions(t *testing.T) {
 	executor := dbhelper.Sharded(&Order{}).
-		Server("127.0.0.1", 3306, "root", "pass", "order_db").
+		Server(testDbHost, testDbPort, testDbUser, testDbPassword, testOrderDbName).
 		ExprTable("order_tab_${index}",
 			"${idx} := range(0, 10)",
 			"${idx} = hash(@{shop_id}) % 10",
@@ -243,8 +234,8 @@ func Test_Builder_WithOptions(t *testing.T) {
 
 func Test_Builder_MultiServer(t *testing.T) {
 	executor := dbhelper.Sharded(&Order{}).
-		AddServer("0", "10.0.0.1", 3306, "root", "pass", "order_db_0").
-		AddServer("1", "10.0.0.2", 3306, "root", "pass", "order_db_1").
+		AddServer("0", testDbHost, testDbPort, testDbUser, testDbPassword, "order_db_0").
+		AddServer("1", testDbHost, testDbPort, testDbUser, testDbPassword, "order_db_1").
 		ExprDb("${idx}",
 			"${idx} := range(0, 2)",
 			"${idx} = hash(@{shop_id}) % 2",

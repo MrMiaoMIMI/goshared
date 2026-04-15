@@ -2,10 +2,22 @@ package example
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/MrMiaoMIMI/goshared/db/dbhelper"
 	"github.com/MrMiaoMIMI/goshared/db/dbspi"
+)
+
+const (
+	testDbHost      = "127.0.0.1"
+	testDbPort      = 3306
+	testDbUser      = "root"
+	testDbPassword  = "123456"
+	testDbName      = "my_test"
+	testAppDbName   = "my_app_db"
+	testOrderDbName = "order_db"
+	testDebugMode   = true
 )
 
 // Example demonstrates how to use the GORM implementation of dbspi
@@ -51,8 +63,13 @@ func NewUserFieldManager() *UserFieldManager {
 }
 
 func testNewDb() dbspi.Db {
-	dbConfig := dbhelper.NewDbConfig("127.0.0.1", 3306, "root", "123456", "my_test")
+	dbConfig := dbhelper.NewDbConfig(testDbHost, testDbPort, testDbUser, testDbPassword, testDbName)
 	return dbhelper.NewDb(dbConfig)
+}
+
+func testDSN(dbName string) string {
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		testDbUser, testDbPassword, testDbHost, testDbPort, dbName)
 }
 
 // ExampleUsage demonstrates various usage patterns

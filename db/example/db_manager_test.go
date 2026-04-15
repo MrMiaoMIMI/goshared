@@ -29,8 +29,8 @@ type OrderItem struct {
 	Name    string
 }
 
-func (*OrderItem) TableName() string  { return "order_item_tab" }
-func (*OrderItem) DbKey() string      { return "order_dbs" }
+func (*OrderItem) TableName() string   { return "order_item_tab" }
+func (*OrderItem) DbKey() string       { return "order_dbs" }
 func (*OrderItem) IdFiledName() string { return "id" }
 
 // OrderDetail shares the same database group but has different table sharding.
@@ -41,8 +41,8 @@ type OrderDetail struct {
 	Detail  string
 }
 
-func (*OrderDetail) TableName() string  { return "order_detail_tab" }
-func (*OrderDetail) DbKey() string      { return "order_dbs" }
+func (*OrderDetail) TableName() string   { return "order_detail_tab" }
+func (*OrderDetail) DbKey() string       { return "order_dbs" }
 func (*OrderDetail) IdFiledName() string { return "id" }
 
 // ==================== DbManager: Non-sharded ====================
@@ -51,8 +51,8 @@ func Test_DbManager_Simple(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
 		Databases: map[string]dbhelper.DatabaseEntry{
 			"default": {
-				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
-				DbName: "my_app_db",
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+				DbName: testAppDbName,
 			},
 		},
 	})
@@ -70,7 +70,7 @@ func Test_DbManager_DSN(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
 		Databases: map[string]dbhelper.DatabaseEntry{
 			"default": {
-				DSN:          "root:pass@tcp(127.0.0.1:3306)/my_app_db?charset=utf8mb4&parseTime=True&loc=Local",
+				DSN:          testDSN(testAppDbName),
 				MaxOpenConns: 200,
 			},
 		},
@@ -89,11 +89,11 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
 		Databases: map[string]dbhelper.DatabaseEntry{
 			"default": {
-				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
-				DbName: "my_app_db",
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+				DbName: testAppDbName,
 			},
 			"order_dbs": {
-				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbSharding: &dbhelper.DbShardConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 4)", "${idx} = hash(@{shop_id}) % 4"},
@@ -139,11 +139,11 @@ func Test_DbManager_NamedDbSharding(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
 		Databases: map[string]dbhelper.DatabaseEntry{
 			"default": {
-				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
-				DbName: "my_app_db",
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+				DbName: testAppDbName,
 			},
 			"order_dbs": {
-				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbSharding: &dbhelper.DbShardConfig{
 					NameExpr:    "order_${region}_db",
 					ExpandExprs: []string{"${region} := enum(SG, TH, ID)", "${region} = @{region}"},
@@ -172,11 +172,11 @@ func Test_DbManager_GlobalDefault(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
 		Databases: map[string]dbhelper.DatabaseEntry{
 			"default": {
-				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
-				DbName: "my_app_db",
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+				DbName: testAppDbName,
 			},
 			"order_dbs": {
-				Host: "127.0.0.1", Port: 3306, User: "root", Password: "pass",
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbSharding: &dbhelper.DbShardConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 4)", "${idx} = hash(@{shop_id}) % 4"},
