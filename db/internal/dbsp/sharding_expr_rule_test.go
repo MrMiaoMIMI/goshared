@@ -403,12 +403,9 @@ func TestRequiredColumnsComposite(t *testing.T) {
 func TestExtractEqColumns_SimpleEq(t *testing.T) {
 	shopId := int64(12345)
 	query := NewQuery(NewField[int64]("shop_id").Eq(&shopId))
-	cols, err := ExtractEqColumnsFromQuery(query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v, ok := cols["shop_id"]; !ok || v != int64(12345) {
-		t.Fatalf("expected shop_id=12345, got %v", cols)
+	cols := ExtractEqColumnsFromQuery(query)
+	if vals, ok := cols["shop_id"]; !ok || len(vals) != 1 || vals[0] != int64(12345) {
+		t.Fatalf("expected shop_id=[12345], got %v", cols)
 	}
 }
 
@@ -419,14 +416,11 @@ func TestExtractEqColumns_MultipleEq(t *testing.T) {
 		NewField[int64]("shop_id").Eq(&shopId),
 		NewField[int]("status").Eq(&status),
 	)
-	cols, err := ExtractEqColumnsFromQuery(query)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cols := ExtractEqColumnsFromQuery(query)
 	if len(cols) != 2 {
 		t.Fatalf("expected 2 columns, got %v", cols)
 	}
-	if cols["shop_id"] != int64(12345) || cols["status"] != 1 {
+	if cols["shop_id"][0] != int64(12345) || cols["status"][0] != 1 {
 		t.Fatalf("unexpected values: %v", cols)
 	}
 }
@@ -438,10 +432,7 @@ func TestExtractEqColumns_NestedAnd(t *testing.T) {
 		And(NewField[int64]("shop_id").Eq(&shopId)),
 		And(NewField[int]("status").Eq(&status)),
 	)
-	cols, err := ExtractEqColumnsFromQuery(query)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cols := ExtractEqColumnsFromQuery(query)
 	if len(cols) != 2 {
 		t.Fatalf("expected 2 columns, got %v", cols)
 	}
@@ -450,28 +441,26 @@ func TestExtractEqColumns_NestedAnd(t *testing.T) {
 func TestExtractEqColumns_DeepNesting(t *testing.T) {
 	shopId := int64(12345)
 	query := NewQuery(And(And(NewField[int64]("shop_id").Eq(&shopId))))
-	cols, err := ExtractEqColumnsFromQuery(query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cols["shop_id"] != int64(12345) {
-		t.Fatalf("deep nesting: expected shop_id=12345, got %v", cols)
+	cols := ExtractEqColumnsFromQuery(query)
+	if cols["shop_id"][0] != int64(12345) {
+		t.Fatalf("deep nesting: expected shop_id=[12345], got %v", cols)
 	}
 }
 
-func TestExtractEqColumns_OrSkipped(t *testing.T) {
+func TestExtractEqColumns_OrExtracted(t *testing.T) {
 	shopId1 := int64(11111)
 	shopId2 := int64(22222)
 	query := Or(
 		NewField[int64]("shop_id").Eq(&shopId1),
 		NewField[int64]("shop_id").Eq(&shopId2),
 	)
-	cols, err := ExtractEqColumnsFromQuery(query)
-	if err != nil {
-		t.Fatal(err)
+	cols := ExtractEqColumnsFromQuery(query)
+	vals := cols["shop_id"]
+	if len(vals) != 2 {
+		t.Fatalf("OR query should yield 2 values for shop_id, got %v", cols)
 	}
-	if len(cols) != 0 {
-		t.Fatalf("OR query should yield 0 columns, got %v", cols)
+	if vals[0] != int64(11111) || vals[1] != int64(22222) {
+		t.Fatalf("expected [11111, 22222], got %v", vals)
 	}
 }
 
@@ -480,62 +469,94 @@ func TestExtractEqColumns_MixedAndOr(t *testing.T) {
 	status1 := 1
 	status2 := 2
 	// AND(OR(status=1, status=2), shop_id=12345)
+	// Both AND and OR branches are traversed for value collection
 	query := NewQuery(
 		Or(NewField[int]("status").Eq(&status1), NewField[int]("status").Eq(&status2)),
 		NewField[int64]("shop_id").Eq(&shopId),
 	)
-	cols, err := ExtractEqColumnsFromQuery(query)
-	if err != nil {
-		t.Fatal(err)
+	cols := ExtractEqColumnsFromQuery(query)
+	if len(cols) != 2 {
+		t.Fatalf("expected 2 columns (shop_id + status), got %v", cols)
 	}
-	if len(cols) != 1 || cols["shop_id"] != int64(12345) {
-		t.Fatalf("expected only {shop_id:12345}, got %v", cols)
+	if cols["shop_id"][0] != int64(12345) {
+		t.Fatalf("expected shop_id=[12345], got %v", cols["shop_id"])
+	}
+	statusVals := cols["status"]
+	if len(statusVals) != 2 {
+		t.Fatalf("expected 2 status values from OR, got %v", statusVals)
 	}
 }
 
-func TestExtractEqColumns_NonEqSkipped(t *testing.T) {
+func TestExtractEqColumns_InExtracted(t *testing.T) {
 	shopIds := []int64{1, 2, 3}
-	amount := int64(100)
 	query := NewQuery(
 		NewField[int64]("shop_id").In(shopIds),
+	)
+	cols := ExtractEqColumnsFromQuery(query)
+	vals := cols["shop_id"]
+	if len(vals) != 3 {
+		t.Fatalf("expected 3 values from IN, got %v", cols)
+	}
+	if vals[0] != int64(1) || vals[1] != int64(2) || vals[2] != int64(3) {
+		t.Fatalf("expected [1, 2, 3], got %v", vals)
+	}
+}
+
+func TestExtractEqColumns_GtSkipped(t *testing.T) {
+	amount := int64(100)
+	query := NewQuery(
 		NewField[int64]("amount").Gt(&amount),
 	)
-	cols, err := ExtractEqColumnsFromQuery(query)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cols := ExtractEqColumnsFromQuery(query)
 	if len(cols) != 0 {
-		t.Fatalf("IN and Gt should not be extracted, got %v", cols)
+		t.Fatalf("Gt should not be extracted, got %v", cols)
+	}
+}
+
+func TestExtractEqColumns_InAndEqMixed(t *testing.T) {
+	shopIds := []int64{11111, 22222}
+	status := 1
+	query := NewQuery(
+		NewField[int64]("shop_id").In(shopIds),
+		NewField[int]("status").Eq(&status),
+	)
+	cols := ExtractEqColumnsFromQuery(query)
+	if len(cols) != 2 {
+		t.Fatalf("expected 2 columns, got %v", cols)
+	}
+	if len(cols["shop_id"]) != 2 {
+		t.Fatalf("expected 2 shop_id values from IN, got %v", cols["shop_id"])
+	}
+	if len(cols["status"]) != 1 || cols["status"][0] != 1 {
+		t.Fatalf("expected status=[1], got %v", cols["status"])
 	}
 }
 
 func TestExtractEqColumns_NilQuery(t *testing.T) {
-	cols, err := ExtractEqColumnsFromQuery(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cols := ExtractEqColumnsFromQuery(nil)
 	if len(cols) != 0 {
 		t.Fatalf("nil query should yield 0 columns, got %v", cols)
 	}
 }
 
-func TestExtractEqColumns_ConflictError(t *testing.T) {
+func TestExtractEqColumns_MultipleValues(t *testing.T) {
 	shopId1 := int64(11111)
 	shopId2 := int64(22222)
 	query := NewQuery(
 		NewField[int64]("shop_id").Eq(&shopId1),
 		NewField[int64]("shop_id").Eq(&shopId2),
 	)
-	_, err := ExtractEqColumnsFromQuery(query)
-	if err == nil {
-		t.Fatal("expected conflict error")
+	cols := ExtractEqColumnsFromQuery(query)
+	vals := cols["shop_id"]
+	if len(vals) != 2 {
+		t.Fatalf("expected 2 values for shop_id, got %v", cols)
 	}
-	if !strings.Contains(err.Error(), "conflicting") {
-		t.Fatalf("expected 'conflicting' in error, got: %v", err)
+	if vals[0] != int64(11111) || vals[1] != int64(22222) {
+		t.Fatalf("expected [11111, 22222], got %v", vals)
 	}
 }
 
-func TestExtractEqColumns_NestedConflictError(t *testing.T) {
+func TestExtractEqColumns_NestedMultipleValues(t *testing.T) {
 	shopId1 := int64(11111)
 	shopId2 := int64(22222)
 	status := 1
@@ -543,62 +564,92 @@ func TestExtractEqColumns_NestedConflictError(t *testing.T) {
 		NewField[int64]("shop_id").Eq(&shopId1),
 		And(NewField[int64]("shop_id").Eq(&shopId2), NewField[int]("status").Eq(&status)),
 	)
-	_, err := ExtractEqColumnsFromQuery(query)
-	if err == nil {
-		t.Fatal("expected nested conflict error")
+	cols := ExtractEqColumnsFromQuery(query)
+	vals := cols["shop_id"]
+	if len(vals) != 2 {
+		t.Fatalf("expected 2 shop_id values from nested AND, got %v", cols)
 	}
-	if !strings.Contains(err.Error(), "conflicting") {
-		t.Fatalf("expected 'conflicting' in error, got: %v", err)
+	if vals[0] != int64(11111) || vals[1] != int64(22222) {
+		t.Fatalf("expected [11111, 22222], got %v", vals)
+	}
+	if len(cols["status"]) != 1 || cols["status"][0] != 1 {
+		t.Fatalf("expected status=[1], got %v", cols["status"])
 	}
 }
 
-func TestExtractEqColumns_SameValueNoConflict(t *testing.T) {
+func TestExtractEqColumns_SameValueCollected(t *testing.T) {
 	shopId := int64(12345)
 	query := NewQuery(
 		NewField[int64]("shop_id").Eq(&shopId),
 		NewField[int64]("shop_id").Eq(&shopId),
 	)
-	cols, err := ExtractEqColumnsFromQuery(query)
-	if err != nil {
-		t.Fatalf("same value should not conflict: %v", err)
+	cols := ExtractEqColumnsFromQuery(query)
+	vals := cols["shop_id"]
+	if len(vals) != 2 {
+		t.Fatalf("expected 2 raw values (dedup happens later), got %v", vals)
 	}
-	if cols["shop_id"] != int64(12345) {
-		t.Fatalf("expected shop_id=12345, got %v", cols)
-	}
-}
-
-// ================== MergeColumns Tests ==================
-
-func TestMergeColumns_NoConflict(t *testing.T) {
-	base := map[string]any{"shop_id": int64(12345)}
-	additions := map[string]any{"region": "SG"}
-	err := mergeColumns(base, additions)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if base["shop_id"] != int64(12345) || base["region"] != "SG" {
-		t.Fatalf("unexpected merged result: %v", base)
+	if vals[0] != int64(12345) || vals[1] != int64(12345) {
+		t.Fatalf("expected [12345, 12345], got %v", vals)
 	}
 }
 
-func TestMergeColumns_SameValue(t *testing.T) {
-	base := map[string]any{"shop_id": int64(12345)}
-	additions := map[string]any{"shop_id": int64(12345)}
-	err := mergeColumns(base, additions)
-	if err != nil {
-		t.Fatalf("same value should not conflict: %v", err)
+// ================== MergeIntoMultiValues Tests ==================
+
+func TestMergeIntoMultiValues_DifferentColumns(t *testing.T) {
+	entity := map[string]any{"shop_id": int64(12345)}
+	query := map[string][]any{"region": {"SG"}}
+	merged := mergeIntoMultiValues(entity, query)
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 columns, got %v", merged)
+	}
+	if merged["shop_id"][0] != int64(12345) || merged["region"][0] != "SG" {
+		t.Fatalf("unexpected merged result: %v", merged)
 	}
 }
 
-func TestMergeColumns_Conflict(t *testing.T) {
-	base := map[string]any{"shop_id": int64(12345)}
-	additions := map[string]any{"shop_id": int64(99999)}
-	err := mergeColumns(base, additions)
-	if err == nil {
-		t.Fatal("expected conflict error")
+func TestMergeIntoMultiValues_SameColumn(t *testing.T) {
+	entity := map[string]any{"shop_id": int64(12345)}
+	query := map[string][]any{"shop_id": {int64(12345)}}
+	merged := mergeIntoMultiValues(entity, query)
+	vals := merged["shop_id"]
+	if len(vals) != 2 {
+		t.Fatalf("expected 2 raw values, got %v", vals)
 	}
-	if !strings.Contains(err.Error(), "conflicting") {
-		t.Fatalf("expected 'conflicting' in error, got: %v", err)
+}
+
+func TestMergeIntoMultiValues_DifferentValues(t *testing.T) {
+	entity := map[string]any{"shop_id": int64(12345)}
+	query := map[string][]any{"shop_id": {int64(99999)}}
+	merged := mergeIntoMultiValues(entity, query)
+	vals := merged["shop_id"]
+	if len(vals) != 2 {
+		t.Fatalf("expected 2 values (both collected for later validation), got %v", vals)
+	}
+	if vals[0] != int64(12345) || vals[1] != int64(99999) {
+		t.Fatalf("expected [12345, 99999], got %v", vals)
+	}
+}
+
+// ================== DeduplicateValues Tests ==================
+
+func TestDeduplicateValues_NoDuplicates(t *testing.T) {
+	vals := deduplicateValues([]any{int64(1), int64(2), int64(3)})
+	if len(vals) != 3 {
+		t.Fatalf("expected 3, got %v", vals)
+	}
+}
+
+func TestDeduplicateValues_WithDuplicates(t *testing.T) {
+	vals := deduplicateValues([]any{int64(1), int64(2), int64(1), int64(3), int64(2)})
+	if len(vals) != 3 {
+		t.Fatalf("expected 3 unique values, got %v", vals)
+	}
+}
+
+func TestDeduplicateValues_AllSame(t *testing.T) {
+	vals := deduplicateValues([]any{int64(42), int64(42), int64(42)})
+	if len(vals) != 1 || vals[0] != int64(42) {
+		t.Fatalf("expected [42], got %v", vals)
 	}
 }
 

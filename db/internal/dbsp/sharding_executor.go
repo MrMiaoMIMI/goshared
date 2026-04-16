@@ -118,9 +118,10 @@ func (r *shardingKeyResolver) fromId(id any) map[string]any {
 }
 
 // fromQuery extracts column-value pairs from Query Eq conditions.
-func (r *shardingKeyResolver) fromQuery(query dbspi.Query) (map[string]any, error) {
+// Returns a multi-value map where each column may have multiple values.
+func (r *shardingKeyResolver) fromQuery(query dbspi.Query) map[string][]any {
 	if query == nil {
-		return make(map[string]any), nil
+		return make(map[string][]any)
 	}
 	return ExtractEqColumnsFromQuery(query)
 }
@@ -150,20 +151,141 @@ func (r *shardingKeyResolver) buildShardingKey(columns map[string]any) (*dbspi.S
 	return sk, nil
 }
 
-// mergeColumns merges additions into base, returning error on conflicting values.
-func mergeColumns(base map[string]any, additions map[string]any) error {
-	for col, newVal := range additions {
-		if existing, exists := base[col]; exists {
-			if !reflect.DeepEqual(existing, newVal) {
-				return fmt.Errorf(
-					"conflicting values for sharding column %q: %v vs %v",
-					col, existing, newVal)
+// mergeIntoMultiValues merges single-value maps (from entity) into a multi-value map
+// (from query extraction). All values are collected for later same-target validation.
+func mergeIntoMultiValues(entityCols map[string]any, queryCols map[string][]any) map[string][]any {
+	result := make(map[string][]any)
+	for col, val := range entityCols {
+		result[col] = append(result[col], val)
+	}
+	for col, vals := range queryCols {
+		result[col] = append(result[col], vals...)
+	}
+	return result
+}
+
+// deduplicateValues returns the distinct values from the input slice,
+// preserving order of first occurrence.
+func deduplicateValues(values []any) []any {
+	var unique []any
+	for _, v := range values {
+		found := false
+		for _, u := range unique {
+			if reflect.DeepEqual(u, v) {
+				found = true
+				break
 			}
+		}
+		if !found {
+			unique = append(unique, v)
+		}
+	}
+	return unique
+}
+
+// resolveTarget resolves a ShardingKey to the target routing coordinates (db key + table name)
+// without looking up the actual Db instance. Used for same-target validation.
+func (e *shardedExecutor[T]) resolveTarget(sk *dbspi.ShardingKey) (dbKey string, tableName string, err error) {
+	if e.dbRule != nil {
+		dbKey, err = e.dbRule.ResolveDbKey(sk)
+		if err != nil {
+			return "", "", fmt.Errorf("resolve db key failed: %w", err)
+		}
+	}
+	tableName = e.entity.TableName()
+	if e.tableRule != nil {
+		tableName, err = e.tableRule.ResolveTable(e.entity.TableName(), sk)
+		if err != nil {
+			return "", "", fmt.Errorf("resolve table failed: %w", err)
+		}
+	}
+	return dbKey, tableName, nil
+}
+
+// reduceColumns deduplicates multi-value columns and validates that all distinct values
+// for each required sharding column route to the same target (db + table).
+// Returns a single-value map suitable for building a ShardingKey.
+func (e *shardedExecutor[T]) reduceColumns(multiCols map[string][]any) (map[string]any, error) {
+	result := make(map[string]any)
+
+	type multiValEntry struct {
+		name   string
+		values []any
+	}
+	var multiValCols []multiValEntry
+
+	for col, values := range multiCols {
+		unique := deduplicateValues(values)
+		if len(unique) == 0 {
 			continue
 		}
-		base[col] = newVal
+		result[col] = unique[0]
+		if len(unique) > 1 && e.isRequiredColumn(col) {
+			multiValCols = append(multiValCols, multiValEntry{name: col, values: unique})
+		}
 	}
-	return nil
+
+	if len(multiValCols) == 0 {
+		return result, nil
+	}
+
+	// Check all required columns are present before attempting resolution
+	if e.keyResolver != nil {
+		for _, reqCol := range e.keyResolver.requiredCols {
+			if _, ok := result[reqCol]; !ok {
+				return result, nil // missing column; buildShardingKey will report it
+			}
+		}
+	}
+
+	// Build reference ShardingKey with first values and resolve the reference target
+	refSk := dbspi.NewShardingKey()
+	for _, col := range e.keyResolver.requiredCols {
+		refSk.SetVal(col, result[col])
+	}
+	refDbKey, refTable, err := e.resolveTarget(refSk)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate each alternative value routes to the same target
+	for _, mvc := range multiValCols {
+		for _, altVal := range mvc.values[1:] {
+			altSk := dbspi.NewShardingKey()
+			for _, reqCol := range e.keyResolver.requiredCols {
+				if reqCol == mvc.name {
+					altSk.SetVal(reqCol, altVal)
+				} else {
+					altSk.SetVal(reqCol, result[reqCol])
+				}
+			}
+			altDbKey, altTable, err := e.resolveTarget(altSk)
+			if err != nil {
+				return nil, fmt.Errorf("validate sharding column %q value %v: %w", mvc.name, altVal, err)
+			}
+			if altDbKey != refDbKey || altTable != refTable {
+				return nil, fmt.Errorf(
+					"cross-shard query not allowed: column %q values %v route to different targets "+
+						"(db=%q table=%q vs db=%q table=%q)",
+					mvc.name, mvc.values, refDbKey, refTable, altDbKey, altTable)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// isRequiredColumn checks if a column is required by the sharding rules.
+func (e *shardedExecutor[T]) isRequiredColumn(col string) bool {
+	if e.keyResolver == nil {
+		return false
+	}
+	for _, c := range e.keyResolver.requiredCols {
+		if c == col {
+			return true
+		}
+	}
+	return false
 }
 
 type shardedExecutor[T dbspi.Entity] struct {
@@ -297,7 +419,8 @@ func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Qu
 		return e.resolveExecutor(sk)
 	}
 	if e.keyResolver != nil {
-		columns, err := e.keyResolver.fromQuery(query)
+		multiCols := e.keyResolver.fromQuery(query)
+		columns, err := e.reduceColumns(multiCols)
 		if err != nil {
 			return nil, err
 		}
@@ -310,21 +433,18 @@ func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Qu
 	return nil, dbspi.ErrShardingKeyRequired
 }
 
-// resolveForEntityAndQuery resolves using: ctx key > entity + query (merged, with conflict detection).
+// resolveForEntityAndQuery resolves using: ctx key > entity + query (merged, with same-target validation).
 func (e *shardedExecutor[T]) resolveForEntityAndQuery(ctx context.Context, entity T, query dbspi.Query) (dbspi.Executor[T], error) {
 	if sk, ok := dbspi.ShardingKeyFromCtx(ctx); ok {
 		return e.resolveExecutor(sk)
 	}
 	if e.keyResolver != nil {
-		columns := e.keyResolver.fromEntity(entity)
-		if query != nil {
-			queryColumns, err := e.keyResolver.fromQuery(query)
-			if err != nil {
-				return nil, err
-			}
-			if err := mergeColumns(columns, queryColumns); err != nil {
-				return nil, err
-			}
+		entityCols := e.keyResolver.fromEntity(entity)
+		queryCols := e.keyResolver.fromQuery(query)
+		merged := mergeIntoMultiValues(entityCols, queryCols)
+		columns, err := e.reduceColumns(merged)
+		if err != nil {
+			return nil, err
 		}
 		sk, err := e.keyResolver.buildShardingKey(columns)
 		if err != nil {

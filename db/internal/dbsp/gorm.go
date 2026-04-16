@@ -2,7 +2,6 @@ package dbsp
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"time"
 
@@ -408,70 +407,63 @@ func (q *GormQuery) ToGormExpression() clause.Expression {
 
 // ================== Sharding Key Column Extraction ==================
 
-// extractEqColumns extracts column-value pairs from clause.Eq conditions.
-// Returns error if the same column appears with conflicting values.
-func (c *GormCondition) extractEqColumns(out map[string]any) error {
-	eq, ok := c.expr.(clause.Eq)
-	if !ok {
-		return nil
-	}
-	col, ok := eq.Column.(clause.Column)
-	if !ok {
-		return nil
-	}
-	if existing, exists := out[col.Name]; exists {
-		if !reflect.DeepEqual(existing, eq.Value) {
-			return fmt.Errorf("conflicting values for sharding column %q: %v vs %v",
-				col.Name, existing, eq.Value)
+// extractEqColumns collects column values from Eq and IN conditions.
+// Multiple values per column are allowed; deduplication and validation
+// happen later in the sharding executor.
+func (c *GormCondition) extractEqColumns(out map[string][]any) {
+	switch expr := c.expr.(type) {
+	case clause.Eq:
+		col, ok := expr.Column.(clause.Column)
+		if !ok {
+			return
 		}
-		return nil
+		out[col.Name] = append(out[col.Name], expr.Value)
+	case clause.IN:
+		col, ok := expr.Column.(clause.Column)
+		if !ok {
+			return
+		}
+		out[col.Name] = append(out[col.Name], expr.Values...)
 	}
-	out[col.Name] = eq.Value
-	return nil
 }
 
-// extractEqColumns deeply and recursively extracts column-value pairs from
-// AND-connected Eq conditions. OR/NOT branches are skipped entirely because
-// they don't provide single deterministic values for routing.
-func (q *GormQuery) extractEqColumns(out map[string]any) error {
-	if q.keyword != keywordAnd {
-		return nil
+// extractEqColumns recursively collects column-value pairs from Eq and IN conditions.
+// AND and OR branches are both traversed to collect all values.
+// NOT branches are skipped (negation doesn't provide usable routing values).
+func (q *GormQuery) extractEqColumns(out map[string][]any) {
+	if q.keyword == keywordNot {
+		return
 	}
 	for _, cond := range q.conditions {
 		if cond == nil {
 			continue
 		}
-		var err error
 		switch c := cond.(type) {
 		case *GormCondition:
-			err = c.extractEqColumns(out)
+			c.extractEqColumns(out)
 		case *GormQuery:
-			err = c.extractEqColumns(out)
+			c.extractEqColumns(out)
 		case *GormSelectQuery:
-			err = c.GormQuery.extractEqColumns(out)
-		}
-		if err != nil {
-			return err
+			c.GormQuery.extractEqColumns(out)
 		}
 	}
-	return nil
 }
 
-// ExtractEqColumnsFromQuery extracts all column-value pairs from Eq conditions
-// in AND-connected query trees. Used by sharded executor to auto-build sharding keys.
-func ExtractEqColumnsFromQuery(query dbspi.Query) (map[string]any, error) {
-	out := make(map[string]any)
+// ExtractEqColumnsFromQuery extracts all column-value pairs from Eq and IN conditions
+// in query trees (AND and OR). Each column may have multiple values.
+// Used by sharded executor to auto-build sharding keys with same-target validation.
+func ExtractEqColumnsFromQuery(query dbspi.Query) map[string][]any {
+	out := make(map[string][]any)
 	if query == nil {
-		return out, nil
+		return out
 	}
-	var err error
 	switch q := query.(type) {
 	case *GormQuery:
-		err = q.extractEqColumns(out)
+		q.extractEqColumns(out)
 	case *GormSelectQuery:
-		err = q.GormQuery.extractEqColumns(out)
+		q.GormQuery.extractEqColumns(out)
 	}
-	return out, err
+	return out
 }
 
 // ================== Updater Implementation ==================

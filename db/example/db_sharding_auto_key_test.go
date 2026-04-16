@@ -415,9 +415,9 @@ func Test_AutoKey_MissingColumn_EntityLacksRegion(t *testing.T) {
 	t.Logf("Missing column error: %v", err)
 }
 
-// ==================== Query conflict detection ====================
+// ==================== Same-table validation (values route to same shard) ====================
 
-func Test_AutoKey_QueryConflict_SameColumnDifferentValues(t *testing.T) {
+func Test_AutoKey_QuerySameTable_DifferentValues(t *testing.T) {
 	db := testNewDb()
 
 	shopIdField := dbhelper.NewField[int64]("shop_id")
@@ -433,22 +433,50 @@ func Test_AutoKey_QueryConflict_SameColumnDifferentValues(t *testing.T) {
 	)
 
 	ctx := context.Background()
+	// 11111 % 10 = 1, 21111 % 10 = 1 → same table → allowed
+	shopId1 := int64(11111)
+	shopId2 := int64(21111)
+
+	query := dbhelper.Q(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
+	orders, err := executor.Find(ctx, query, nil)
+	if err != nil {
+		t.Fatalf("Same-table values should not error, got: %v", err)
+	}
+	t.Logf("Same-table different values: orders=%v, err=%v", orders, err)
+}
+
+func Test_AutoKey_QueryCrossShard_DifferentValues(t *testing.T) {
+	db := testNewDb()
+
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
 	shopId1 := int64(11111)
 	shopId2 := int64(22222)
 
-	// AND(shop_id=11111, shop_id=22222) -- conflict!
-	conflictQuery := dbhelper.Q(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
-	_, err := executor.Find(ctx, conflictQuery, nil)
+	query := dbhelper.Q(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
+	_, err := executor.Find(ctx, query, nil)
 	if err == nil {
-		t.Fatal("Expected conflict error")
+		t.Fatal("Expected cross-shard error")
 	}
-	if !strings.Contains(err.Error(), "conflicting") {
-		t.Fatalf("Error should mention 'conflicting', got: %v", err)
+	if !strings.Contains(err.Error(), "cross-shard") {
+		t.Fatalf("Error should mention 'cross-shard', got: %v", err)
 	}
-	t.Logf("Query conflict error: %v", err)
+	t.Logf("Cross-shard error: %v", err)
 }
 
-func Test_AutoKey_QueryConflict_NestedSameColumnDifferentValues(t *testing.T) {
+func Test_AutoKey_QueryCrossShard_NestedDifferentValues(t *testing.T) {
 	db := testNewDb()
 
 	shopIdField := dbhelper.NewField[int64]("shop_id")
@@ -465,23 +493,23 @@ func Test_AutoKey_QueryConflict_NestedSameColumnDifferentValues(t *testing.T) {
 	)
 
 	ctx := context.Background()
+	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
 	shopId1 := int64(11111)
 	shopId2 := int64(22222)
 	status := 1
 
-	// AND(shop_id=11111, AND(shop_id=22222, status=1)) -- nested conflict
 	conflictQuery := dbhelper.Q(
 		shopIdField.Eq(&shopId1),
 		dbhelper.Q(shopIdField.Eq(&shopId2), statusField.Eq(&status)),
 	)
 	_, err := executor.Find(ctx, conflictQuery, nil)
 	if err == nil {
-		t.Fatal("Expected nested conflict error")
+		t.Fatal("Expected nested cross-shard error")
 	}
-	if !strings.Contains(err.Error(), "conflicting") {
-		t.Fatalf("Error should mention 'conflicting', got: %v", err)
+	if !strings.Contains(err.Error(), "cross-shard") {
+		t.Fatalf("Error should mention 'cross-shard', got: %v", err)
 	}
-	t.Logf("Nested query conflict error: %v", err)
+	t.Logf("Nested cross-shard error: %v", err)
 }
 
 func Test_AutoKey_QueryNoConflict_SameValue(t *testing.T) {
@@ -536,7 +564,7 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_NoConflict(t *testing.T) {
 	t.Logf("FirstOrCreate no conflict (same shop_id): err=%v", err)
 }
 
-func Test_AutoKey_FirstOrCreate_EntityAndQuery_Conflict(t *testing.T) {
+func Test_AutoKey_FirstOrCreate_EntityAndQuery_CrossShard(t *testing.T) {
 	db := testNewDb()
 
 	shopIdField := dbhelper.NewField[int64]("shop_id")
@@ -552,25 +580,23 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_Conflict(t *testing.T) {
 	)
 
 	ctx := context.Background()
+	// Entity shop_id=12345 (% 10 = 5), query shop_id=99999 (% 10 = 9) → different tables
 	queryShopId := int64(99999)
 
-	// Entity has shop_id=12345, query has shop_id=99999 -- conflict!
 	_, err := executor.FirstOrCreate(ctx,
 		&Order{ShopID: 12345, Amount: 100},
 		dbhelper.Q(shopIdField.Eq(&queryShopId)),
 	)
 	if err == nil {
-		t.Fatal("Expected cross-source conflict error")
+		t.Fatal("Expected cross-shard error")
 	}
-	if !strings.Contains(err.Error(), "conflicting") {
-		t.Fatalf("Error should mention 'conflicting', got: %v", err)
+	if !strings.Contains(err.Error(), "cross-shard") {
+		t.Fatalf("Error should mention 'cross-shard', got: %v", err)
 	}
-	t.Logf("FirstOrCreate cross-source conflict: %v", err)
+	t.Logf("FirstOrCreate cross-shard: %v", err)
 }
 
-// ==================== OR query: columns not extractable ====================
-
-func Test_AutoKey_OrQuery_NotExtractable(t *testing.T) {
+func Test_AutoKey_FirstOrCreate_EntityAndQuery_SameTable(t *testing.T) {
 	db := testNewDb()
 
 	shopIdField := dbhelper.NewField[int64]("shop_id")
@@ -586,19 +612,168 @@ func Test_AutoKey_OrQuery_NotExtractable(t *testing.T) {
 	)
 
 	ctx := context.Background()
+	// Entity shop_id=12345 (% 10 = 5), query shop_id=22345 (% 10 = 5) → same table → OK
+	queryShopId := int64(22345)
+
+	_, err := executor.FirstOrCreate(ctx,
+		&Order{ShopID: 12345, Amount: 100},
+		dbhelper.Q(shopIdField.Eq(&queryShopId)),
+	)
+	t.Logf("FirstOrCreate same-table different values: err=%v", err)
+}
+
+// ==================== OR query: now extractable with same-target validation ====================
+
+func Test_AutoKey_OrQuery_SameTable(t *testing.T) {
+	db := testNewDb()
+
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	// 11111 % 10 = 1, 21111 % 10 = 1 → same table → allowed
+	shopId1 := int64(11111)
+	shopId2 := int64(21111)
+
+	orQuery := dbhelper.Or(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
+	orders, err := executor.Find(ctx, orQuery, nil)
+	if err != nil {
+		t.Fatalf("OR query with same-table values should succeed, got: %v", err)
+	}
+	t.Logf("OR query same table: orders=%v, err=%v", orders, err)
+}
+
+func Test_AutoKey_InQuery_SameTable(t *testing.T) {
+	db := testNewDb()
+
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	// 11111 % 10 = 1, 21111 % 10 = 1 → same table → allowed
+	shopId1 := int64(11111)
+	shopId2 := int64(21111)
+
+	inQuery := dbhelper.Q(shopIdField.In([]int64{shopId1, shopId2}))
+	orders, err := executor.Find(ctx, inQuery, nil)
+	if err != nil {
+		t.Fatalf("IN query with same-table values should succeed, got: %v", err)
+	}
+	t.Logf("IN query same table: orders=%v, err=%v", orders, err)
+}
+
+func Test_AutoKey_OrQuery_CrossShard(t *testing.T) {
+	db := testNewDb()
+
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
 	shopId1 := int64(11111)
 	shopId2 := int64(22222)
 
-	// OR(shop_id=11111, shop_id=22222) -- OR is skipped, no columns extracted
 	orQuery := dbhelper.Or(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
 	_, err := executor.Find(ctx, orQuery, nil)
 	if err == nil {
-		t.Fatal("Expected missing column error for OR query")
+		t.Fatal("Expected cross-shard error for OR query")
 	}
-	if !strings.Contains(err.Error(), "missing") {
-		t.Fatalf("Error should mention 'missing', got: %v", err)
+	if !strings.Contains(err.Error(), "cross-shard") {
+		t.Fatalf("Error should mention 'cross-shard', got: %v", err)
 	}
-	t.Logf("OR query not extractable: %v", err)
+	t.Logf("OR query cross-shard: %v", err)
+}
+
+func Test_AutoKey_InQuery_CrossShard(t *testing.T) {
+	db := testNewDb()
+
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
+	shopId1 := int64(11111)
+	shopId2 := int64(22222)
+
+	inQuery := dbhelper.Q(shopIdField.In([]int64{shopId1, shopId2}))
+	_, err := executor.Find(ctx, inQuery, nil)
+	if err == nil {
+		t.Fatal("Expected cross-shard error for OR query")
+	}
+	if !strings.Contains(err.Error(), "cross-shard") {
+		t.Fatalf("Error should mention 'cross-shard', got: %v", err)
+	}
+	t.Logf("OR query cross-shard: %v", err)
+}
+
+func Test_AutoKey_MixedQuery_OrWithAndSameTable(t *testing.T) {
+	db := testNewDb()
+
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+	statusField := dbhelper.NewField[int]("status")
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	shopId := int64(12345)
+	status1 := 1
+	status2 := 2
+
+	// AND(OR(status=1, status=2), shop_id=12345)
+	// shop_id has one value; status has two values but is not a required sharding column
+	query := dbhelper.Q(
+		dbhelper.Or(statusField.Eq(&status1), statusField.Eq(&status2)),
+		shopIdField.Eq(&shopId),
+	)
+	orders, err := executor.Find(ctx, query, nil)
+	if err != nil {
+		t.Fatalf("Mixed AND/OR with non-sharding OR column should succeed, got: %v", err)
+	}
+	t.Logf("Mixed query OR+AND: orders=%v, err=%v", orders, err)
 }
 
 // ==================== Nil query: columns not extractable ====================
