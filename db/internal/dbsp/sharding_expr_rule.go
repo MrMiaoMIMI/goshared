@@ -9,7 +9,10 @@ import (
 
 // ================== Expression DB Rule ==================
 
-var _ dbspi.DbShardingRule = (*exprDbRule)(nil)
+var (
+	_ dbspi.DbShardingRule            = (*exprDbRule)(nil)
+	_ dbspi.ShardingKeyColumnsProvider = (*exprDbRule)(nil)
+)
 
 type exprDbRule struct {
 	tmpl    *expr.Template
@@ -30,6 +33,10 @@ func (r *exprDbRule) ResolveDbKey(sk *dbspi.ShardingKey) (string, error) {
 		return "", err
 	}
 	return r.tmpl.Eval(ctx)
+}
+
+func (r *exprDbRule) RequiredColumns() []string {
+	return r.expands.RequiredColumns()
 }
 
 func (r *exprDbRule) buildContext(sk *dbspi.ShardingKey) (*expr.EvalContext, error) {
@@ -118,9 +125,10 @@ func copyContextVars(src, dst *expr.EvalContext) {
 // ================== Expression Table Rule ==================
 
 var (
-	_ dbspi.TableShardingRule = (*exprTableRule)(nil)
-	_ dbspi.ShardCounter     = (*exprTableRule)(nil)
-	_ dbspi.ShardEnumerator  = (*exprTableRule)(nil)
+	_ dbspi.TableShardingRule          = (*exprTableRule)(nil)
+	_ dbspi.ShardCounter               = (*exprTableRule)(nil)
+	_ dbspi.ShardEnumerator            = (*exprTableRule)(nil)
+	_ dbspi.ShardingKeyColumnsProvider = (*exprTableRule)(nil)
 )
 
 type exprTableRule struct {
@@ -159,6 +167,10 @@ func NewExprTableRule(tmpl *expr.Template, expands *expr.ExpandSet) (*exprTableR
 	}
 
 	return rule, nil
+}
+
+func (r *exprTableRule) RequiredColumns() []string {
+	return r.expands.RequiredColumns()
 }
 
 func (r *exprTableRule) ResolveTable(logicalTable string, sk *dbspi.ShardingKey) (string, error) {

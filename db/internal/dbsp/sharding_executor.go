@@ -19,12 +19,160 @@ type ShardedExecutorConfig struct {
 	MaxConcurrency int
 }
 
+// shardingKeyResolver auto-extracts sharding key column values from CRUD parameters.
+// Built once at executor construction time using reflection on entity type T.
+type shardingKeyResolver struct {
+	requiredCols []string       // union of db rule + table rule required columns
+	fieldMap     map[string]int // gorm column name -> struct field index
+	idColumnName string         // from Ider or default "id"
+}
+
+// buildShardingKeyResolver creates a resolver from the sharding rules and entity type.
+// Returns nil if any rule doesn't implement ShardingKeyColumnsProvider.
+func buildShardingKeyResolver(entityType reflect.Type, idColumnName string, dbRule dbspi.DbShardingRule, tableRule dbspi.TableShardingRule) *shardingKeyResolver {
+	seen := make(map[string]bool)
+	var requiredCols []string
+
+	if dbRule != nil {
+		provider, ok := dbRule.(dbspi.ShardingKeyColumnsProvider)
+		if !ok {
+			return nil
+		}
+		for _, col := range provider.RequiredColumns() {
+			if !seen[col] {
+				seen[col] = true
+				requiredCols = append(requiredCols, col)
+			}
+		}
+	}
+	if tableRule != nil {
+		provider, ok := tableRule.(dbspi.ShardingKeyColumnsProvider)
+		if !ok {
+			return nil
+		}
+		for _, col := range provider.RequiredColumns() {
+			if !seen[col] {
+				seen[col] = true
+				requiredCols = append(requiredCols, col)
+			}
+		}
+	}
+
+	if len(requiredCols) == 0 {
+		return nil
+	}
+
+	fieldMap := buildColumnFieldMap(entityType)
+
+	return &shardingKeyResolver{
+		requiredCols: requiredCols,
+		fieldMap:     fieldMap,
+		idColumnName: idColumnName,
+	}
+}
+
+// buildColumnFieldMap builds a mapping from gorm column names to struct field indices.
+func buildColumnFieldMap(t reflect.Type) map[string]int {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	m := make(map[string]int)
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		colName := ""
+		if tag := field.Tag.Get("gorm"); tag != "" {
+			for _, part := range strings.Split(tag, ";") {
+				kv := strings.SplitN(part, ":", 2)
+				if len(kv) == 2 && kv[0] == "column" {
+					colName = kv[1]
+					break
+				}
+			}
+		}
+		if colName == "" {
+			colName = toSnakeCase(field.Name)
+		}
+		m[colName] = i
+	}
+	return m
+}
+
+// fromEntity extracts sharding-relevant column values from an entity struct.
+func (r *shardingKeyResolver) fromEntity(entity any) map[string]any {
+	val := reflect.ValueOf(entity)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	result := make(map[string]any)
+	for _, col := range r.requiredCols {
+		if idx, ok := r.fieldMap[col]; ok {
+			result[col] = val.Field(idx).Interface()
+		}
+	}
+	return result
+}
+
+// fromId constructs a column map from an ID parameter.
+func (r *shardingKeyResolver) fromId(id any) map[string]any {
+	return map[string]any{r.idColumnName: id}
+}
+
+// fromQuery extracts column-value pairs from Query Eq conditions.
+func (r *shardingKeyResolver) fromQuery(query dbspi.Query) (map[string]any, error) {
+	if query == nil {
+		return make(map[string]any), nil
+	}
+	return ExtractEqColumnsFromQuery(query)
+}
+
+// buildShardingKey validates that all required columns are present and builds a ShardingKey.
+func (r *shardingKeyResolver) buildShardingKey(columns map[string]any) (*dbspi.ShardingKey, error) {
+	var missing []string
+	for _, col := range r.requiredCols {
+		if _, ok := columns[col]; !ok {
+			missing = append(missing, col)
+		}
+	}
+	if len(missing) > 0 {
+		available := make([]string, 0, len(columns))
+		for k := range columns {
+			available = append(available, k)
+		}
+		return nil, fmt.Errorf(
+			"sharding key missing required columns: %v (available: %v). "+
+				"Provide via WithShardingKey(ctx, key) or ensure values exist in entity/query parameters",
+			missing, available)
+	}
+	sk := dbspi.NewShardingKey()
+	for _, col := range r.requiredCols {
+		sk.SetVal(col, columns[col])
+	}
+	return sk, nil
+}
+
+// mergeColumns merges additions into base, returning error on conflicting values.
+func mergeColumns(base map[string]any, additions map[string]any) error {
+	for col, newVal := range additions {
+		if existing, exists := base[col]; exists {
+			if !reflect.DeepEqual(existing, newVal) {
+				return fmt.Errorf(
+					"conflicting values for sharding column %q: %v vs %v",
+					col, existing, newVal)
+			}
+			continue
+		}
+		base[col] = newVal
+	}
+	return nil
+}
+
 type shardedExecutor[T dbspi.Entity] struct {
 	entity         T
 	dbs            []dbspi.DbTarget
 	dbRule         dbspi.DbShardingRule
 	tableRule      dbspi.TableShardingRule
 	maxConcurrency int
+	keyResolver    *shardingKeyResolver
 }
 
 func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *shardedExecutor[T] {
@@ -35,12 +183,21 @@ func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *sh
 		panic("sharded executor requires at least one of WithTableRule or WithDbRule")
 	}
 
+	idColumnName := "id"
+	if ider, ok := any(entity).(dbspi.Ider); ok {
+		idColumnName = ider.IdFiledName()
+	}
+
+	entityType := reflect.TypeOf(entity)
+	resolver := buildShardingKeyResolver(entityType, idColumnName, cfg.DbRule, cfg.TableRule)
+
 	return &shardedExecutor[T]{
 		entity:         entity,
 		dbs:            cfg.Dbs,
 		dbRule:         cfg.DbRule,
 		tableRule:      cfg.TableRule,
 		maxConcurrency: cfg.MaxConcurrency,
+		keyResolver:    resolver,
 	}
 }
 
@@ -93,12 +250,89 @@ func (e *shardedExecutor[T]) resolveExecutor(sk *dbspi.ShardingKey) (dbspi.Execu
 }
 
 // resolveFromCtx extracts the ShardingKey from context and resolves the executor.
+// This is the fallback for methods where auto-extraction is not possible (Raw, Exec).
 func (e *shardedExecutor[T]) resolveFromCtx(ctx context.Context) (dbspi.Executor[T], error) {
 	sk, ok := dbspi.ShardingKeyFromCtx(ctx)
 	if !ok {
 		return nil, dbspi.ErrShardingKeyRequired
 	}
 	return e.resolveExecutor(sk)
+}
+
+// resolveForEntity resolves using: ctx key > entity struct fields.
+func (e *shardedExecutor[T]) resolveForEntity(ctx context.Context, entity T) (dbspi.Executor[T], error) {
+	if sk, ok := dbspi.ShardingKeyFromCtx(ctx); ok {
+		return e.resolveExecutor(sk)
+	}
+	if e.keyResolver != nil {
+		columns := e.keyResolver.fromEntity(entity)
+		sk, err := e.keyResolver.buildShardingKey(columns)
+		if err != nil {
+			return nil, err
+		}
+		return e.resolveExecutor(sk)
+	}
+	return nil, dbspi.ErrShardingKeyRequired
+}
+
+// resolveForId resolves using: ctx key > id parameter.
+func (e *shardedExecutor[T]) resolveForId(ctx context.Context, id any) (dbspi.Executor[T], error) {
+	if sk, ok := dbspi.ShardingKeyFromCtx(ctx); ok {
+		return e.resolveExecutor(sk)
+	}
+	if e.keyResolver != nil {
+		columns := e.keyResolver.fromId(id)
+		sk, err := e.keyResolver.buildShardingKey(columns)
+		if err != nil {
+			return nil, err
+		}
+		return e.resolveExecutor(sk)
+	}
+	return nil, dbspi.ErrShardingKeyRequired
+}
+
+// resolveForQuery resolves using: ctx key > query Eq conditions.
+func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Query) (dbspi.Executor[T], error) {
+	if sk, ok := dbspi.ShardingKeyFromCtx(ctx); ok {
+		return e.resolveExecutor(sk)
+	}
+	if e.keyResolver != nil {
+		columns, err := e.keyResolver.fromQuery(query)
+		if err != nil {
+			return nil, err
+		}
+		sk, err := e.keyResolver.buildShardingKey(columns)
+		if err != nil {
+			return nil, err
+		}
+		return e.resolveExecutor(sk)
+	}
+	return nil, dbspi.ErrShardingKeyRequired
+}
+
+// resolveForEntityAndQuery resolves using: ctx key > entity + query (merged, with conflict detection).
+func (e *shardedExecutor[T]) resolveForEntityAndQuery(ctx context.Context, entity T, query dbspi.Query) (dbspi.Executor[T], error) {
+	if sk, ok := dbspi.ShardingKeyFromCtx(ctx); ok {
+		return e.resolveExecutor(sk)
+	}
+	if e.keyResolver != nil {
+		columns := e.keyResolver.fromEntity(entity)
+		if query != nil {
+			queryColumns, err := e.keyResolver.fromQuery(query)
+			if err != nil {
+				return nil, err
+			}
+			if err := mergeColumns(columns, queryColumns); err != nil {
+				return nil, err
+			}
+		}
+		sk, err := e.keyResolver.buildShardingKey(columns)
+		if err != nil {
+			return nil, err
+		}
+		return e.resolveExecutor(sk)
+	}
+	return nil, dbspi.ErrShardingKeyRequired
 }
 
 // Shard routes to a specific shard by the given ShardingKey.
@@ -109,10 +343,12 @@ func (e *shardedExecutor[T]) Shard(key *dbspi.ShardingKey) (dbspi.Executor[T], e
 	return e.resolveExecutor(key)
 }
 
-// ================== CRUD methods (resolve from ctx) ==================
+// ================== CRUD methods ==================
+
+// -- ID-based methods (resolve from ctx > id) --
 
 func (e *shardedExecutor[T]) GetById(ctx context.Context, id any) (T, error) {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForId(ctx, id)
 	if err != nil {
 		var zero T
 		return zero, err
@@ -121,7 +357,7 @@ func (e *shardedExecutor[T]) GetById(ctx context.Context, id any) (T, error) {
 }
 
 func (e *shardedExecutor[T]) ExistsById(ctx context.Context, id any) (bool, T, error) {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForId(ctx, id)
 	if err != nil {
 		var zero T
 		return false, zero, err
@@ -130,7 +366,7 @@ func (e *shardedExecutor[T]) ExistsById(ctx context.Context, id any) (bool, T, e
 }
 
 func (e *shardedExecutor[T]) UpdateById(ctx context.Context, id any, updater dbspi.Updater) error {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForId(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -138,15 +374,17 @@ func (e *shardedExecutor[T]) UpdateById(ctx context.Context, id any, updater dbs
 }
 
 func (e *shardedExecutor[T]) DeleteById(ctx context.Context, id any) error {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForId(ctx, id)
 	if err != nil {
 		return err
 	}
 	return exec.DeleteById(ctx, id)
 }
 
+// -- Query-based methods (resolve from ctx > query) --
+
 func (e *shardedExecutor[T]) Find(ctx context.Context, query dbspi.Query, pagenation dbspi.PaginationConfig) ([]T, error) {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +392,7 @@ func (e *shardedExecutor[T]) Find(ctx context.Context, query dbspi.Query, pagena
 }
 
 func (e *shardedExecutor[T]) Exists(ctx context.Context, query dbspi.Query) (bool, T, error) {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		var zero T
 		return false, zero, err
@@ -163,63 +401,15 @@ func (e *shardedExecutor[T]) Exists(ctx context.Context, query dbspi.Query) (boo
 }
 
 func (e *shardedExecutor[T]) Count(ctx context.Context, query dbspi.Query) (uint64, error) {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		return 0, err
 	}
 	return exec.Count(ctx, query)
 }
 
-func (e *shardedExecutor[T]) Create(ctx context.Context, entity T) error {
-	exec, err := e.resolveFromCtx(ctx)
-	if err != nil {
-		return err
-	}
-	return exec.Create(ctx, entity)
-}
-
-func (e *shardedExecutor[T]) Save(ctx context.Context, entity T) error {
-	exec, err := e.resolveFromCtx(ctx)
-	if err != nil {
-		return err
-	}
-	return exec.Save(ctx, entity)
-}
-
-func (e *shardedExecutor[T]) Update(ctx context.Context, entity T) error {
-	exec, err := e.resolveFromCtx(ctx)
-	if err != nil {
-		return err
-	}
-	return exec.Update(ctx, entity)
-}
-
-func (e *shardedExecutor[T]) Delete(ctx context.Context, entity T) error {
-	exec, err := e.resolveFromCtx(ctx)
-	if err != nil {
-		return err
-	}
-	return exec.Delete(ctx, entity)
-}
-
-func (e *shardedExecutor[T]) BatchCreate(ctx context.Context, entities []T, batchSize int) error {
-	exec, err := e.resolveFromCtx(ctx)
-	if err != nil {
-		return err
-	}
-	return exec.BatchCreate(ctx, entities, batchSize)
-}
-
-func (e *shardedExecutor[T]) BatchSave(ctx context.Context, entities []T) error {
-	exec, err := e.resolveFromCtx(ctx)
-	if err != nil {
-		return err
-	}
-	return exec.BatchSave(ctx, entities)
-}
-
 func (e *shardedExecutor[T]) UpdateByQuery(ctx context.Context, query dbspi.Query, updater dbspi.Updater) error {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		return err
 	}
@@ -227,21 +417,81 @@ func (e *shardedExecutor[T]) UpdateByQuery(ctx context.Context, query dbspi.Quer
 }
 
 func (e *shardedExecutor[T]) DeleteByQuery(ctx context.Context, query dbspi.Query) error {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		return err
 	}
 	return exec.DeleteByQuery(ctx, query)
 }
 
+// -- Entity-based methods (resolve from ctx > entity) --
+
+func (e *shardedExecutor[T]) Create(ctx context.Context, entity T) error {
+	exec, err := e.resolveForEntity(ctx, entity)
+	if err != nil {
+		return err
+	}
+	return exec.Create(ctx, entity)
+}
+
+func (e *shardedExecutor[T]) Save(ctx context.Context, entity T) error {
+	exec, err := e.resolveForEntity(ctx, entity)
+	if err != nil {
+		return err
+	}
+	return exec.Save(ctx, entity)
+}
+
+func (e *shardedExecutor[T]) Update(ctx context.Context, entity T) error {
+	exec, err := e.resolveForEntity(ctx, entity)
+	if err != nil {
+		return err
+	}
+	return exec.Update(ctx, entity)
+}
+
+func (e *shardedExecutor[T]) Delete(ctx context.Context, entity T) error {
+	exec, err := e.resolveForEntity(ctx, entity)
+	if err != nil {
+		return err
+	}
+	return exec.Delete(ctx, entity)
+}
+
+func (e *shardedExecutor[T]) BatchCreate(ctx context.Context, entities []T, batchSize int) error {
+	if len(entities) == 0 {
+		return nil
+	}
+	exec, err := e.resolveForEntity(ctx, entities[0])
+	if err != nil {
+		return err
+	}
+	return exec.BatchCreate(ctx, entities, batchSize)
+}
+
+func (e *shardedExecutor[T]) BatchSave(ctx context.Context, entities []T) error {
+	if len(entities) == 0 {
+		return nil
+	}
+	exec, err := e.resolveForEntity(ctx, entities[0])
+	if err != nil {
+		return err
+	}
+	return exec.BatchSave(ctx, entities)
+}
+
+// -- Multi-source method (resolve from ctx > entity + query) --
+
 func (e *shardedExecutor[T]) FirstOrCreate(ctx context.Context, entity T, query dbspi.Query) (T, error) {
-	exec, err := e.resolveFromCtx(ctx)
+	exec, err := e.resolveForEntityAndQuery(ctx, entity, query)
 	if err != nil {
 		var zero T
 		return zero, err
 	}
 	return exec.FirstOrCreate(ctx, entity, query)
 }
+
+// -- Raw SQL methods (resolve from ctx only, no auto-extraction) --
 
 func (e *shardedExecutor[T]) Raw(ctx context.Context, sql string, args ...any) ([]T, error) {
 	exec, err := e.resolveFromCtx(ctx)

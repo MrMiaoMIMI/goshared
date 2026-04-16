@@ -60,7 +60,7 @@ func Test_Sharding_TableOnly_WithShard(t *testing.T) {
 		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
 			"order_tab_${index}",
 			"${idx} := range(0, 10)",
-			"${idx} = hash(@{shop_id}) % 10",
+			"${idx} = @{shop_id} % 10",
 			"${index} = fill(${idx}, 8)",
 		)),
 	)
@@ -92,7 +92,7 @@ func Test_Sharding_TableOnly_WithCtx(t *testing.T) {
 		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
 			"order_tab_${index}",
 			"${idx} := range(0, 8)",
-			"${idx} = hash(@{shop_id}) % 8",
+			"${idx} = @{shop_id} % 8",
 			"${index} = fill(${idx}, 8)",
 		)),
 	)
@@ -120,7 +120,7 @@ func Test_Sharding_MissingKey(t *testing.T) {
 		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
 			"order_tab_${index}",
 			"${idx} := range(0, 8)",
-			"${idx} = hash(@{shop_id}) % 8",
+			"${idx} = @{shop_id} % 8",
 			"${index} = fill(${idx}, 8)",
 		)),
 	)
@@ -140,7 +140,7 @@ func Test_Sharding_FindAll(t *testing.T) {
 		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
 			"order_tab_${index}",
 			"${idx} := range(0, 10)",
-			"${idx} = hash(@{shop_id}) % 10",
+			"${idx} = @{shop_id} % 10",
 			"${index} = fill(${idx}, 8)",
 		)),
 	)
@@ -168,12 +168,12 @@ func Test_Sharding_DbAndTable(t *testing.T) {
 		dbhelper.WithDbRule(dbhelper.NewExprDbRule(
 			"${idx}",
 			"${idx} := range(0, 2)",
-			"${idx} = hash(@{shop_id}) % 2",
+			"${idx} = @{shop_id} % 2",
 		)),
 		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
 			"order_tab_${index}",
 			"${idx} := range(0, 10)",
-			"${idx} = hash(@{shop_id}) % 10",
+			"${idx} = @{shop_id} % 10",
 			"${index} = fill(${idx}, 8)",
 		)),
 	)
@@ -252,7 +252,7 @@ func Test_Sharding_CompositeKey(t *testing.T) {
 		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
 			"order_tab_${index}",
 			"${idx} := range(0, 10)",
-			"${idx} = hash(@{shop_id}) % 10",
+			"${idx} = @{shop_id} % 10",
 			"${index} = fill(${idx}, 8)",
 		)),
 	)

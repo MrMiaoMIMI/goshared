@@ -96,11 +96,11 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbSharding: &dbhelper.DbShardConfig{
 					NameExpr:    "order_db_${idx}",
-					ExpandExprs: []string{"${idx} := range(0, 4)", "${idx} = hash(@{shop_id}) % 4"},
+					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
 				TableSharding: &dbhelper.TableShardConfig{
 					NameExpr:    "order_tab_${index}",
-					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
+					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
 				MaxConcurrency: 5,
 				EntityRules: []dbhelper.EntityRule{
@@ -108,7 +108,7 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 						Tables: []string{"order_detail_tab"},
 						TableSharding: &dbhelper.TableShardConfig{
 							NameExpr:    "order_detail_tab_${index}",
-							ExpandExprs: []string{"${idx} := range(0, 20)", "${idx} = hash(@{shop_id}) % 20", "${index} = fill(${idx}, 8)"},
+							ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 						},
 					},
 				},
@@ -146,11 +146,11 @@ func Test_DbManager_NamedDbSharding(t *testing.T) {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbSharding: &dbhelper.DbShardConfig{
 					NameExpr:    "order_${region}_db",
-					ExpandExprs: []string{"${region} := enum(SG, TH, ID)", "${region} = @{region}"},
+					ExpandExprs: []string{"${region} := enum(SG, TH)", "${region} = @{region}"},
 				},
 				TableSharding: &dbhelper.TableShardConfig{
 					NameExpr:    "order_tab_${index}",
-					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
+					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
 			},
 		},
@@ -179,11 +179,11 @@ func Test_DbManager_GlobalDefault(t *testing.T) {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbSharding: &dbhelper.DbShardConfig{
 					NameExpr:    "order_db_${idx}",
-					ExpandExprs: []string{"${idx} := range(0, 4)", "${idx} = hash(@{shop_id}) % 4"},
+					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
 				TableSharding: &dbhelper.TableShardConfig{
 					NameExpr:    "order_tab_${index}",
-					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
+					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
 			},
 		},

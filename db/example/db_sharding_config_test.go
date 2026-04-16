@@ -26,7 +26,7 @@ import (
 //           NameExpr: "order_tab_${index}",
 //           ExpandExprs: []string{
 //               "${idx} := range(0, 10)",
-//               "${idx} = hash(@{shop_id}) % 10",
+//               "${idx} = @{shop_id} % 10",
 //               "${index} = fill(${idx}, 8)",
 //           },
 //       },
@@ -38,7 +38,7 @@ import (
 //       Server("10.0.0.1", 3306, "root", "pass", "order_db").
 //       ExprTable("order_tab_${index}",
 //           "${idx} := range(0, 10)",
-//           "${idx} = hash(@{shop_id}) % 10",
+//           "${idx} = @{shop_id} % 10",
 //           "${index} = fill(${idx}, 8)").
 //       Build()
 //
@@ -50,7 +50,7 @@ func Test_Config_TableOnly(t *testing.T) {
 	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
 		Server: &dbhelper.ServerConfig{
 			Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-			DbName: testOrderDbName, Debug: testDebugMode,
+			DbName: testDbName, Debug: testDebugMode,
 		},
 		Table: &dbhelper.TableShardConfig{
 			NameExpr:    "order_tab_${index}",
@@ -68,11 +68,11 @@ func Test_Config_DbAndTable(t *testing.T) {
 	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
 		Server: &dbhelper.ServerConfig{
 			Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-			DbName: testOrderDbName, Debug: testDebugMode,
+			DbName: testDbName, Debug: testDebugMode,
 		},
 		Db: &dbhelper.DbShardConfig{
 			NameExpr:    "order_db_${idx}",
-			ExpandExprs: []string{"${idx} := range(0, 4)", "${idx} = @{shop_id} % 4"},
+			ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 		},
 		Table: &dbhelper.TableShardConfig{
 			NameExpr:    "order_tab_${index}",
@@ -93,11 +93,11 @@ func Test_Config_NamedDbs(t *testing.T) {
 		},
 		Db: &dbhelper.DbShardConfig{
 			NameExpr:    "order_${region}_db",
-			ExpandExprs: []string{"${region} := enum(SG, TH, ID)", "${region} = @{region}"},
+			ExpandExprs: []string{"${region} := enum(SG, TH)", "${region} = @{region}"},
 		},
 		Table: &dbhelper.TableShardConfig{
 			NameExpr:    "order_tab_${index}",
-			ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
+			ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 		},
 	})
 
@@ -117,11 +117,11 @@ func Test_Config_MultiServer(t *testing.T) {
 		},
 		Db: &dbhelper.DbShardConfig{
 			NameExpr:    "${idx}",
-			ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = hash(@{shop_id}) % 2"},
+			ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 		},
 		Table: &dbhelper.TableShardConfig{
 			NameExpr:    "order_tab_${index}",
-			ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
+			ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 		},
 	})
 
@@ -135,7 +135,7 @@ func Test_Config_WithConnPool(t *testing.T) {
 	executor := dbhelper.NewShardedExecutorFromConfig(&Order{}, dbhelper.ShardingConfig{
 		Server: &dbhelper.ServerConfig{
 			Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-			DbName:                 testOrderDbName,
+			DbName:                 testDbName,
 			MaxOpenConns:           200,
 			MaxIdleConns:           20,
 			ConnMaxLifetimeSeconds: 1800,
@@ -143,7 +143,7 @@ func Test_Config_WithConnPool(t *testing.T) {
 		},
 		Table: &dbhelper.TableShardConfig{
 			NameExpr:    "order_tab_${index}",
-			ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = hash(@{shop_id}) % 10", "${index} = fill(${idx}, 8)"},
+			ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 		},
 	})
 
@@ -157,10 +157,10 @@ func Test_Config_WithConnPool(t *testing.T) {
 
 func Test_Builder_TableOnly(t *testing.T) {
 	executor := dbhelper.Sharded(&Order{}).
-		Server(testDbHost, testDbPort, testDbUser, testDbPassword, testOrderDbName).
+		Server(testDbHost, testDbPort, testDbUser, testDbPassword, testDbName).
 		ExprTable("order_tab_${index}",
 			"${idx} := range(0, 10)",
-			"${idx} = hash(@{shop_id}) % 10",
+			"${idx} = @{shop_id} % 10",
 			"${index} = fill(${idx}, 8)",
 		).
 		Build()
@@ -175,12 +175,12 @@ func Test_Builder_DbAndTable(t *testing.T) {
 	executor := dbhelper.Sharded(&Order{}).
 		Server(testDbHost, testDbPort, testDbUser, testDbPassword).
 		ExprDb("order_db_${idx}",
-			"${idx} := range(0, 4)",
-			"${idx} = hash(@{shop_id}) % 4",
+			"${idx} := range(0, 2)",
+			"${idx} = @{shop_id} % 2",
 		).
 		ExprTable("order_tab_${index}",
 			"${idx} := range(0, 10)",
-			"${idx} = hash(@{shop_id}) % 10",
+			"${idx} = @{shop_id} % 10",
 			"${index} = fill(${idx}, 8)",
 		).
 		Build()
@@ -195,12 +195,12 @@ func Test_Builder_NamedDbs(t *testing.T) {
 	executor := dbhelper.Sharded(&Order{}).
 		Server(testDbHost, testDbPort, testDbUser, testDbPassword).
 		ExprDb("order_${region}_db",
-			"${region} := enum(SG, TH, ID)",
+			"${region} := enum(SG, TH)",
 			"${region} = @{region}",
 		).
 		ExprTable("order_tab_${index}",
 			"${idx} := range(0, 10)",
-			"${idx} = hash(@{shop_id}) % 10",
+			"${idx} = @{shop_id} % 10",
 			"${index} = fill(${idx}, 8)",
 		).
 		Build()
@@ -215,10 +215,10 @@ func Test_Builder_NamedDbs(t *testing.T) {
 
 func Test_Builder_WithOptions(t *testing.T) {
 	executor := dbhelper.Sharded(&Order{}).
-		Server(testDbHost, testDbPort, testDbUser, testDbPassword, testOrderDbName).
+		Server(testDbHost, testDbPort, testDbUser, testDbPassword, testDbName).
 		ExprTable("order_tab_${index}",
 			"${idx} := range(0, 10)",
-			"${idx} = hash(@{shop_id}) % 10",
+			"${idx} = @{shop_id} % 10",
 			"${index} = fill(${idx}, 8)",
 		).
 		ConnPool(200, 20, 1800).
@@ -238,11 +238,11 @@ func Test_Builder_MultiServer(t *testing.T) {
 		AddServer("1", testDbHost, testDbPort, testDbUser, testDbPassword, "order_db_1").
 		ExprDb("${idx}",
 			"${idx} := range(0, 2)",
-			"${idx} = hash(@{shop_id}) % 2",
+			"${idx} = @{shop_id} % 2",
 		).
 		ExprTable("order_tab_${index}",
 			"${idx} := range(0, 10)",
-			"${idx} = hash(@{shop_id}) % 10",
+			"${idx} = @{shop_id} % 10",
 			"${index} = fill(${idx}, 8)",
 		).
 		Build()

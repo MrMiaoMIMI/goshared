@@ -163,6 +163,39 @@ func collectVarRefsFromExpr(e Expr) []string {
 	return refs
 }
 
+// collectColRefsFromExpr recursively collects all @{column} references from an expression.
+func collectColRefsFromExpr(e Expr) []string {
+	switch n := e.(type) {
+	case *ColRef:
+		return []string{n.Name}
+	case *BinaryOp:
+		return append(collectColRefsFromExpr(n.Left), collectColRefsFromExpr(n.Right)...)
+	case *FuncCall:
+		var refs []string
+		for _, arg := range n.Args {
+			refs = append(refs, collectColRefsFromExpr(arg)...)
+		}
+		return refs
+	}
+	return nil
+}
+
+// RequiredColumns returns the deduplicated list of @{column} references
+// used across all compute expressions in this ExpandSet.
+func (s *ExpandSet) RequiredColumns() []string {
+	seen := make(map[string]bool)
+	var cols []string
+	for _, comp := range s.Computes {
+		for _, name := range collectColRefsFromExpr(comp.Expr) {
+			if !seen[name] {
+				seen[name] = true
+				cols = append(cols, name)
+			}
+		}
+	}
+	return cols
+}
+
 // parseDeclRHS parses the RHS of a := declaration.
 // Supports: enum(val1, val2, ...) and range(start, end)
 func parseDeclRHS(varName, rhs string) (*ExpandDecl, error) {

@@ -10,14 +10,13 @@ import (
 )
 
 const (
-	testDbHost      = "127.0.0.1"
-	testDbPort      = 3306
-	testDbUser      = "root"
-	testDbPassword  = "123456"
-	testDbName      = "my_test"
-	testAppDbName   = "my_app_db"
-	testOrderDbName = "order_db"
-	testDebugMode   = true
+	testDbHost     = "127.0.0.1"
+	testDbPort     = 3306
+	testDbUser     = "root"
+	testDbPassword = "123456"
+	testDbName     = "my_test"
+	testAppDbName  = "my_app_db"
+	testDebugMode  = true
 )
 
 // Example demonstrates how to use the GORM implementation of dbspi
@@ -63,7 +62,7 @@ func NewUserFieldManager() *UserFieldManager {
 }
 
 func testNewDb() dbspi.Db {
-	dbConfig := dbhelper.NewDbConfig(testDbHost, testDbPort, testDbUser, testDbPassword, testDbName)
+	dbConfig := dbhelper.NewDbConfig(testDbHost, testDbPort, testDbUser, testDbPassword, testDbName, dbhelper.WithDebugMode(testDebugMode))
 	return dbhelper.NewDb(dbConfig)
 }
 

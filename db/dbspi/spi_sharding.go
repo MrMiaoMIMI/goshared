@@ -84,6 +84,13 @@ type ShardEnumerator interface {
 	ShardName(logicalTable string, index int) (string, error)
 }
 
+// ShardingKeyColumnsProvider is an optional interface that sharding rules
+// can implement to declare which @{column} names they require.
+// Used by sharded executors to auto-extract sharding keys from CRUD parameters.
+type ShardingKeyColumnsProvider interface {
+	RequiredColumns() []string
+}
+
 // ================== Context helpers ==================
 
 type shardingKeyCtxKey struct{}
