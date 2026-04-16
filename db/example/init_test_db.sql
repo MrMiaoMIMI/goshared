@@ -103,7 +103,10 @@ CREATE TABLE `order_tab` (
 -- 1.4 order_tab sharded tables (10-way)
 CALL create_sharded_tables('my_test', 'order_tab', @order_cols, 10);
 
--- 1.5 Seed data for User tests
+-- 1.5 order_detail_tab sharded tables (10-way, for ${table} variable tests)
+CALL create_sharded_tables('my_test', 'order_detail_tab', @order_detail_cols, 10);
+
+-- 1.6 Seed data for User tests
 INSERT INTO `dbspi_test_user_tab` (`id`, `name`, `email`, `age`, `status`, `deleted`) VALUES
     (1,  'Alice',   'alice@example.com',   25, 'active',   0),
     (13, 'Charlie', 'charlie@example.com', 28, 'active',   0),
@@ -222,13 +225,15 @@ DROP PROCEDURE IF EXISTS create_sharded_tables;
 --
 -- Tables per database:
 --   my_test      : dbspi_test_user_tab, users, order_tab (base),
---                  order_tab_* (x10)                              = 13 tables
+--                  order_tab_* (x10),
+--                  order_detail_tab_* (x10)                       = 23 tables
 --   my_app_db    : dbspi_test_user_tab                            =  1 table
 --   order_db_0~1 : order_tab_*(x10) + order_item_tab_*(x10)
 --                  + order_detail_tab_*(x10)                      = 30 tables x 2 = 60 tables
 --   order_SG/TH_db : order_tab_* (x10)                           = 10 tables x 2 = 20 tables
---                                                        Total   = 94 tables
+--                                                        Total   = 104 tables
 --
 -- All order_tab tables include a `region` column for RegionalOrder tests.
+-- order_detail_tab_* in my_test is for ${table} variable tests (OrderDetailTab entity).
 -- All tests use the same local connection (127.0.0.1:3306).
 -- ============================================================

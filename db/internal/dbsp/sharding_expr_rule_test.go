@@ -339,6 +339,80 @@ func TestExprDbRuleMissingColumn(t *testing.T) {
 	t.Logf("error: %v", err)
 }
 
+// ================== ${table} Variable Tests ==================
+
+func TestExprTableRule_TableVar_ResolveTable(t *testing.T) {
+	tmpl, _ := expr.ParseTemplate("${table}_${index}")
+	expands, _ := expr.ParseExpands([]string{
+		`${idx} := range(0, 10)`,
+		`${idx} = @{shop_id} % 10`,
+		`${index} = fill(${idx}, 4)`,
+	})
+	rule, _ := NewExprTableRule(tmpl, expands)
+
+	sk := dbspi.NewShardingKey().SetVal("shop_id", int64(5))
+	name, err := rule.ResolveTable("order_tab", sk)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "order_tab_0005" {
+		t.Fatalf("expected 'order_tab_0005', got %q", name)
+	}
+
+	name, err = rule.ResolveTable("order_detail_tab", sk)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "order_detail_tab_0005" {
+		t.Fatalf("expected 'order_detail_tab_0005', got %q", name)
+	}
+}
+
+func TestExprTableRule_TableVar_ShardName(t *testing.T) {
+	tmpl, _ := expr.ParseTemplate("${table}_${index}")
+	expands, _ := expr.ParseExpands([]string{
+		`${idx} := range(0, 10)`,
+		`${idx} = @{shop_id} % 10`,
+		`${index} = fill(${idx}, 4)`,
+	})
+	rule, _ := NewExprTableRule(tmpl, expands)
+
+	name, err := rule.ShardName("order_tab", 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "order_tab_0003" {
+		t.Fatalf("expected 'order_tab_0003', got %q", name)
+	}
+
+	name, err = rule.ShardName("order_detail_tab", 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "order_detail_tab_0007" {
+		t.Fatalf("expected 'order_detail_tab_0007', got %q", name)
+	}
+}
+
+func TestExprTableRule_TableVar_BackwardCompatible(t *testing.T) {
+	tmpl, _ := expr.ParseTemplate("order_tab_${index}")
+	expands, _ := expr.ParseExpands([]string{
+		`${idx} := range(0, 10)`,
+		`${idx} = @{shop_id} % 10`,
+		`${index} = fill(${idx}, 4)`,
+	})
+	rule, _ := NewExprTableRule(tmpl, expands)
+
+	sk := dbspi.NewShardingKey().SetVal("shop_id", int64(5))
+	name, err := rule.ResolveTable("order_tab", sk)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "order_tab_0005" {
+		t.Fatalf("backward compat broken: expected 'order_tab_0005', got %q", name)
+	}
+}
+
 // ================== RequiredColumns Tests ==================
 
 func TestExprDbRuleRequiredColumns(t *testing.T) {
@@ -398,14 +472,17 @@ func TestRequiredColumnsComposite(t *testing.T) {
 	}
 }
 
-// ================== ExtractEqColumnsFromQuery Tests ==================
+// ================== ExtractColumnsFromQuery Tests ==================
 
 func TestExtractEqColumns_SimpleEq(t *testing.T) {
 	shopId := int64(12345)
 	query := NewQuery(NewField[int64]("shop_id").Eq(&shopId))
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, rangeCols := ExtractColumnsFromQuery(query)
 	if vals, ok := cols["shop_id"]; !ok || len(vals) != 1 || vals[0] != int64(12345) {
 		t.Fatalf("expected shop_id=[12345], got %v", cols)
+	}
+	if len(rangeCols) != 0 {
+		t.Fatalf("expected no range cols, got %v", rangeCols)
 	}
 }
 
@@ -416,7 +493,7 @@ func TestExtractEqColumns_MultipleEq(t *testing.T) {
 		NewField[int64]("shop_id").Eq(&shopId),
 		NewField[int]("status").Eq(&status),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	if len(cols) != 2 {
 		t.Fatalf("expected 2 columns, got %v", cols)
 	}
@@ -432,7 +509,7 @@ func TestExtractEqColumns_NestedAnd(t *testing.T) {
 		And(NewField[int64]("shop_id").Eq(&shopId)),
 		And(NewField[int]("status").Eq(&status)),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	if len(cols) != 2 {
 		t.Fatalf("expected 2 columns, got %v", cols)
 	}
@@ -441,7 +518,7 @@ func TestExtractEqColumns_NestedAnd(t *testing.T) {
 func TestExtractEqColumns_DeepNesting(t *testing.T) {
 	shopId := int64(12345)
 	query := NewQuery(And(And(NewField[int64]("shop_id").Eq(&shopId))))
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	if cols["shop_id"][0] != int64(12345) {
 		t.Fatalf("deep nesting: expected shop_id=[12345], got %v", cols)
 	}
@@ -454,7 +531,7 @@ func TestExtractEqColumns_OrExtracted(t *testing.T) {
 		NewField[int64]("shop_id").Eq(&shopId1),
 		NewField[int64]("shop_id").Eq(&shopId2),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	vals := cols["shop_id"]
 	if len(vals) != 2 {
 		t.Fatalf("OR query should yield 2 values for shop_id, got %v", cols)
@@ -468,13 +545,11 @@ func TestExtractEqColumns_MixedAndOr(t *testing.T) {
 	shopId := int64(12345)
 	status1 := 1
 	status2 := 2
-	// AND(OR(status=1, status=2), shop_id=12345)
-	// Both AND and OR branches are traversed for value collection
 	query := NewQuery(
 		Or(NewField[int]("status").Eq(&status1), NewField[int]("status").Eq(&status2)),
 		NewField[int64]("shop_id").Eq(&shopId),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	if len(cols) != 2 {
 		t.Fatalf("expected 2 columns (shop_id + status), got %v", cols)
 	}
@@ -492,7 +567,7 @@ func TestExtractEqColumns_InExtracted(t *testing.T) {
 	query := NewQuery(
 		NewField[int64]("shop_id").In(shopIds),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	vals := cols["shop_id"]
 	if len(vals) != 3 {
 		t.Fatalf("expected 3 values from IN, got %v", cols)
@@ -502,14 +577,55 @@ func TestExtractEqColumns_InExtracted(t *testing.T) {
 	}
 }
 
-func TestExtractEqColumns_GtSkipped(t *testing.T) {
+func TestExtractEqColumns_GtDetectedAsRange(t *testing.T) {
 	amount := int64(100)
 	query := NewQuery(
 		NewField[int64]("amount").Gt(&amount),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, rangeCols := ExtractColumnsFromQuery(query)
 	if len(cols) != 0 {
-		t.Fatalf("Gt should not be extracted, got %v", cols)
+		t.Fatalf("Gt should not be extracted as value, got %v", cols)
+	}
+	if !rangeCols["amount"] {
+		t.Fatalf("Gt should mark 'amount' as range column, got %v", rangeCols)
+	}
+}
+
+func TestExtractEqColumns_AllRangeTypes(t *testing.T) {
+	v := int64(100)
+	query := NewQuery(
+		NewField[int64]("a").Gt(&v),
+		NewField[int64]("b").GtEq(&v),
+		NewField[int64]("c").Lt(&v),
+		NewField[int64]("d").LtEq(&v),
+	)
+	cols, rangeCols := ExtractColumnsFromQuery(query)
+	if len(cols) != 0 {
+		t.Fatalf("range conditions should not extract values, got %v", cols)
+	}
+	for _, col := range []string{"a", "b", "c", "d"} {
+		if !rangeCols[col] {
+			t.Fatalf("expected %q in rangeCols, got %v", col, rangeCols)
+		}
+	}
+}
+
+func TestExtractEqColumns_EqAndRangeMixed(t *testing.T) {
+	shopId := int64(12345)
+	amount := int64(100)
+	query := NewQuery(
+		NewField[int64]("shop_id").Eq(&shopId),
+		NewField[int64]("amount").Gt(&amount),
+	)
+	cols, rangeCols := ExtractColumnsFromQuery(query)
+	if len(cols) != 1 || cols["shop_id"][0] != int64(12345) {
+		t.Fatalf("expected shop_id=[12345], got %v", cols)
+	}
+	if !rangeCols["amount"] {
+		t.Fatalf("expected 'amount' in rangeCols, got %v", rangeCols)
+	}
+	if rangeCols["shop_id"] {
+		t.Fatalf("shop_id should not be in rangeCols")
 	}
 }
 
@@ -520,7 +636,7 @@ func TestExtractEqColumns_InAndEqMixed(t *testing.T) {
 		NewField[int64]("shop_id").In(shopIds),
 		NewField[int]("status").Eq(&status),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	if len(cols) != 2 {
 		t.Fatalf("expected 2 columns, got %v", cols)
 	}
@@ -533,9 +649,12 @@ func TestExtractEqColumns_InAndEqMixed(t *testing.T) {
 }
 
 func TestExtractEqColumns_NilQuery(t *testing.T) {
-	cols := ExtractEqColumnsFromQuery(nil)
+	cols, rangeCols := ExtractColumnsFromQuery(nil)
 	if len(cols) != 0 {
 		t.Fatalf("nil query should yield 0 columns, got %v", cols)
+	}
+	if len(rangeCols) != 0 {
+		t.Fatalf("nil query should yield 0 range cols, got %v", rangeCols)
 	}
 }
 
@@ -546,7 +665,7 @@ func TestExtractEqColumns_MultipleValues(t *testing.T) {
 		NewField[int64]("shop_id").Eq(&shopId1),
 		NewField[int64]("shop_id").Eq(&shopId2),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	vals := cols["shop_id"]
 	if len(vals) != 2 {
 		t.Fatalf("expected 2 values for shop_id, got %v", cols)
@@ -564,7 +683,7 @@ func TestExtractEqColumns_NestedMultipleValues(t *testing.T) {
 		NewField[int64]("shop_id").Eq(&shopId1),
 		And(NewField[int64]("shop_id").Eq(&shopId2), NewField[int]("status").Eq(&status)),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	vals := cols["shop_id"]
 	if len(vals) != 2 {
 		t.Fatalf("expected 2 shop_id values from nested AND, got %v", cols)
@@ -583,7 +702,7 @@ func TestExtractEqColumns_SameValueCollected(t *testing.T) {
 		NewField[int64]("shop_id").Eq(&shopId),
 		NewField[int64]("shop_id").Eq(&shopId),
 	)
-	cols := ExtractEqColumnsFromQuery(query)
+	cols, _ := ExtractColumnsFromQuery(query)
 	vals := cols["shop_id"]
 	if len(vals) != 2 {
 		t.Fatalf("expected 2 raw values (dedup happens later), got %v", vals)
@@ -750,7 +869,7 @@ func TestShardingKeyResolver_BuildShardingKey_Success(t *testing.T) {
 	)
 
 	columns := map[string]any{"shop_id": int64(12345)}
-	sk, err := resolver.buildShardingKey(columns)
+	sk, err := resolver.buildShardingKey(columns, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -786,7 +905,7 @@ func TestShardingKeyResolver_BuildShardingKey_MissingColumn(t *testing.T) {
 
 	// Only provide shop_id, missing region
 	columns := map[string]any{"shop_id": int64(12345)}
-	_, err := resolver.buildShardingKey(columns)
+	_, err := resolver.buildShardingKey(columns, nil)
 	if err == nil {
 		t.Fatal("expected missing column error")
 	}
@@ -796,6 +915,37 @@ func TestShardingKeyResolver_BuildShardingKey_MissingColumn(t *testing.T) {
 	if !strings.Contains(err.Error(), "missing") {
 		t.Fatalf("error should mention 'missing', got: %v", err)
 	}
+}
+
+func TestShardingKeyResolver_BuildShardingKey_RangeColumnHint(t *testing.T) {
+	expands, _ := expr.ParseExpands([]string{
+		`${idx} := range(0, 10)`,
+		`${idx} = @{shop_id} % 10`,
+		`${index} = fill(${idx}, 8)`,
+	})
+	tmpl, _ := expr.ParseTemplate("order_tab_${index}")
+	tableRule, _ := NewExprTableRule(tmpl, expands)
+
+	resolver := buildShardingKeyResolver(
+		reflect.TypeOf(&testOrder{}),
+		"id",
+		nil,
+		tableRule,
+	)
+
+	columns := map[string]any{}
+	rangeCols := map[string]bool{"shop_id": true}
+	_, err := resolver.buildShardingKey(columns, rangeCols)
+	if err == nil {
+		t.Fatal("expected error for range-only sharding column")
+	}
+	if !strings.Contains(err.Error(), "range conditions") {
+		t.Fatalf("expected 'range conditions' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "shop_id") {
+		t.Fatalf("expected 'shop_id' in error, got: %v", err)
+	}
+	t.Logf("range hint error: %v", err)
 }
 
 func TestExprTableRuleSimpleHashMod(t *testing.T) {

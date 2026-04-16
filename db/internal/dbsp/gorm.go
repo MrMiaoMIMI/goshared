@@ -410,7 +410,8 @@ func (q *GormQuery) ToGormExpression() clause.Expression {
 // extractEqColumns collects column values from Eq and IN conditions.
 // Multiple values per column are allowed; deduplication and validation
 // happen later in the sharding executor.
-func (c *GormCondition) extractEqColumns(out map[string][]any) {
+// Range conditions (Gt/Gte/Lt/Lte) are recorded in rangeCols for diagnostics.
+func (c *GormCondition) extractEqColumns(out map[string][]any, rangeCols map[string]bool) {
 	switch expr := c.expr.(type) {
 	case clause.Eq:
 		col, ok := expr.Column.(clause.Column)
@@ -424,13 +425,40 @@ func (c *GormCondition) extractEqColumns(out map[string][]any) {
 			return
 		}
 		out[col.Name] = append(out[col.Name], expr.Values...)
+	case clause.Gt:
+		if col, ok := expr.Column.(clause.Column); ok {
+			rangeCols[col.Name] = true
+		}
+	case clause.Gte:
+		if col, ok := expr.Column.(clause.Column); ok {
+			rangeCols[col.Name] = true
+		}
+	case clause.Lt:
+		if col, ok := expr.Column.(clause.Column); ok {
+			rangeCols[col.Name] = true
+		}
+	case clause.Lte:
+		if col, ok := expr.Column.(clause.Column); ok {
+			rangeCols[col.Name] = true
+		}
+	case clause.AndConditions:
+		for _, inner := range expr.Exprs {
+			wrapped := &GormCondition{expr: inner}
+			wrapped.extractEqColumns(out, rangeCols)
+		}
+	case clause.OrConditions:
+		for _, inner := range expr.Exprs {
+			wrapped := &GormCondition{expr: inner}
+			wrapped.extractEqColumns(out, rangeCols)
+		}
 	}
 }
 
 // extractEqColumns recursively collects column-value pairs from Eq and IN conditions.
 // AND and OR branches are both traversed to collect all values.
 // NOT branches are skipped (negation doesn't provide usable routing values).
-func (q *GormQuery) extractEqColumns(out map[string][]any) {
+// Range conditions are recorded in rangeCols for diagnostic purposes.
+func (q *GormQuery) extractEqColumns(out map[string][]any, rangeCols map[string]bool) {
 	if q.keyword == keywordNot {
 		return
 	}
@@ -440,30 +468,32 @@ func (q *GormQuery) extractEqColumns(out map[string][]any) {
 		}
 		switch c := cond.(type) {
 		case *GormCondition:
-			c.extractEqColumns(out)
+			c.extractEqColumns(out, rangeCols)
 		case *GormQuery:
-			c.extractEqColumns(out)
+			c.extractEqColumns(out, rangeCols)
 		case *GormSelectQuery:
-			c.GormQuery.extractEqColumns(out)
+			c.GormQuery.extractEqColumns(out, rangeCols)
 		}
 	}
 }
 
-// ExtractEqColumnsFromQuery extracts all column-value pairs from Eq and IN conditions
+// ExtractColumnsFromQuery extracts all column-value pairs from Eq and IN conditions
 // in query trees (AND and OR). Each column may have multiple values.
-// Used by sharded executor to auto-build sharding keys with same-target validation.
-func ExtractEqColumnsFromQuery(query dbspi.Query) map[string][]any {
-	out := make(map[string][]any)
+// Also detects range conditions (Gt/Lt/Gte/Lte) on columns for diagnostic purposes.
+// Returns the value map and a set of column names that have range conditions.
+func ExtractColumnsFromQuery(query dbspi.Query) (values map[string][]any, rangeCols map[string]bool) {
+	values = make(map[string][]any)
+	rangeCols = make(map[string]bool)
 	if query == nil {
-		return out
+		return values, rangeCols
 	}
 	switch q := query.(type) {
 	case *GormQuery:
-		q.extractEqColumns(out)
+		q.extractEqColumns(values, rangeCols)
 	case *GormSelectQuery:
-		q.GormQuery.extractEqColumns(out)
+		q.GormQuery.extractEqColumns(values, rangeCols)
 	}
-	return out
+	return values, rangeCols
 }
 
 // ================== Updater Implementation ==================

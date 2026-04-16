@@ -265,7 +265,13 @@ func resolveDbEntry(entry DatabaseEntry) *resolvedDbEntry {
 			maxConcurrency: rule.MaxConcurrency,
 		}
 		if rule.TableSharding != nil {
-			tableRule, err := buildTableRule(rule.TableSharding)
+			tsCfg := rule.TableSharding
+			if tsCfg.NameExpr == "" && entry.TableSharding != nil {
+				inherited := *tsCfg
+				inherited.NameExpr = entry.TableSharding.NameExpr
+				tsCfg = &inherited
+			}
+			tableRule, err := buildTableRule(tsCfg)
 			if err != nil {
 				panic(fmt.Sprintf("dbhelper: build entity table rule: %v", err))
 			}

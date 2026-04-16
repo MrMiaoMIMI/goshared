@@ -178,6 +178,7 @@ func (r *exprTableRule) ResolveTable(logicalTable string, sk *dbspi.ShardingKey)
 		return "", dbspi.ErrShardingKeyRequired
 	}
 	ctx := expr.NewContext()
+	ctx.SetVar("table", expr.StrValue(logicalTable))
 	if err := ctx.LoadColumnsFromMap(sk.Fields()); err != nil {
 		return "", fmt.Errorf("load sharding key: %w", err)
 	}
@@ -201,6 +202,7 @@ func (r *exprTableRule) ShardName(logicalTable string, index int) (string, error
 	}
 
 	ctx := expr.NewContext()
+	ctx.SetVar("table", expr.StrValue(logicalTable))
 
 	for _, decl := range r.expands.Decls {
 		if decl.VarName != r.indexVar {

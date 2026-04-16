@@ -970,3 +970,205 @@ func Test_AutoKey_DbManager_FindWithQuery(t *testing.T) {
 	orders, err := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 	t.Logf("DbManager Find with query auto-extract: orders=%v, err=%v", orders, err)
 }
+
+// ==================== ${table} Variable Tests ====================
+
+func Test_TableVar_ResolveTable(t *testing.T) {
+	db := testNewDb()
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"${table}_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	t.Logf("${table} variable resolve: err=%v (Order.TableName()='order_tab' → 'order_tab_00000005')", err)
+}
+
+// OrderDetailTab is a separate entity to test ${table} resolves to different table names.
+type OrderDetailTab struct {
+	ID     int64 `gorm:"primaryKey"`
+	ShopID int64 `gorm:"column:shop_id"`
+	Detail string
+}
+
+func (*OrderDetailTab) TableName() string   { return "order_detail_tab" }
+func (*OrderDetailTab) DbKey() string       { return "order_dbs" }
+func (*OrderDetailTab) IdFiledName() string { return "id" }
+
+func Test_TableVar_DifferentEntitiesSameRule(t *testing.T) {
+	db := testNewDb()
+
+	rule := dbhelper.NewExprTableRule(
+		"${table}_${index}",
+		"${idx} := range(0, 10)",
+		"${idx} = @{shop_id} % 10",
+		"${index} = fill(${idx}, 8)",
+	)
+
+	orderExec := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(rule),
+	)
+	detailExec := dbhelper.NewShardedExecutor(&OrderDetailTab{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(rule),
+	)
+
+	ctx := context.Background()
+	err1 := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err2 := detailExec.Create(ctx, &OrderDetailTab{ShopID: 12345, Detail: "test"})
+	t.Logf("Order resolved → order_tab_XXXXXXXX: err=%v", err1)
+	t.Logf("OrderDetail resolved → order_detail_tab_XXXXXXXX: err=%v", err2)
+}
+
+func Test_TableVar_EntityRuleInheritNameExpr(t *testing.T) {
+	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
+		Databases: map[string]dbhelper.DatabaseEntry{
+			"default": {
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+				DbName: testAppDbName,
+			},
+			"order_dbs": {
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+				TableSharding: &dbhelper.TableShardConfig{
+					NameExpr:    "${table}_${index}",
+					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
+				},
+				EntityRules: []dbhelper.EntityRule{
+					{
+						Tables: []string{"order_detail_tab"},
+						TableSharding: &dbhelper.TableShardConfig{
+							ExpandExprs: []string{"${idx} := range(0, 20)", "${idx} = @{shop_id} % 20", "${index} = fill(${idx}, 8)"},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	orderExec := dbhelper.For(&Order{}, mgr)
+	detailExec := dbhelper.For(&OrderDetailTab{}, mgr)
+
+	ctx := context.Background()
+	err1 := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err2 := detailExec.Create(ctx, &OrderDetailTab{ShopID: 12345, Detail: "test"})
+
+	t.Logf("Order (global rule, 10 shards): err=%v", err1)
+	t.Logf("OrderDetail (inherited name_expr, 20 shards): err=%v", err2)
+}
+
+// ==================== Range Condition Detection Tests ====================
+
+func Test_AutoKey_RangeCondition_Detected(t *testing.T) {
+	db := testNewDb()
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+	minShopId := int64(10000)
+	_, err := executor.Find(ctx, dbhelper.Q(shopIdField.Gt(&minShopId)), nil)
+
+	if err == nil {
+		t.Fatal("expected error for range-only condition on sharding column")
+	}
+	if !strings.Contains(err.Error(), "range conditions") {
+		t.Fatalf("expected 'range conditions' in error, got: %v", err)
+	}
+	t.Logf("Range condition detected: %v", err)
+}
+
+func Test_AutoKey_RangeCondition_LtDetected(t *testing.T) {
+	db := testNewDb()
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+	maxShopId := int64(99999)
+	_, err := executor.Find(ctx, dbhelper.Q(shopIdField.Lt(&maxShopId)), nil)
+
+	if err == nil {
+		t.Fatal("expected error for Lt condition on sharding column")
+	}
+	if !strings.Contains(err.Error(), "range conditions") {
+		t.Fatalf("expected 'range conditions' in error, got: %v", err)
+	}
+	t.Logf("Lt range condition detected: %v", err)
+}
+
+func Test_AutoKey_RangeCondition_WithEqOk(t *testing.T) {
+	db := testNewDb()
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+	amountField := dbhelper.NewField[int64]("amount")
+	shopId := int64(12345)
+	minAmount := int64(100)
+	_, err := executor.Find(ctx,
+		dbhelper.Q(shopIdField.Eq(&shopId), amountField.Gt(&minAmount)), nil)
+
+	t.Logf("Eq on sharding col + Gt on non-sharding col: err=%v (should succeed)", err)
+}
+
+func Test_AutoKey_RangeCondition_BetweenDetected(t *testing.T) {
+	db := testNewDb()
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	ctx := context.Background()
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+	minShopId := int64(10000)
+	maxShopId := int64(99999)
+	_, err := executor.Find(ctx,
+		dbhelper.Q(shopIdField.Between(&minShopId, &maxShopId)), nil)
+
+	if err == nil {
+		t.Fatal("expected error for Between condition on sharding column")
+	}
+	if !strings.Contains(err.Error(), "range conditions") {
+		t.Fatalf("expected 'range conditions' in error, got: %v", err)
+	}
+	t.Logf("Between range condition detected: %v", err)
+}

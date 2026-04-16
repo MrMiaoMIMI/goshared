@@ -117,24 +117,38 @@ func (r *shardingKeyResolver) fromId(id any) map[string]any {
 	return map[string]any{r.idColumnName: id}
 }
 
-// fromQuery extracts column-value pairs from Query Eq conditions.
-// Returns a multi-value map where each column may have multiple values.
-func (r *shardingKeyResolver) fromQuery(query dbspi.Query) map[string][]any {
+// fromQuery extracts column-value pairs from Query Eq/IN conditions.
+// Returns a multi-value map where each column may have multiple values,
+// and a set of columns that have range conditions (for diagnostic errors).
+func (r *shardingKeyResolver) fromQuery(query dbspi.Query) (map[string][]any, map[string]bool) {
 	if query == nil {
-		return make(map[string][]any)
+		return make(map[string][]any), make(map[string]bool)
 	}
-	return ExtractEqColumnsFromQuery(query)
+	return ExtractColumnsFromQuery(query)
 }
 
 // buildShardingKey validates that all required columns are present and builds a ShardingKey.
-func (r *shardingKeyResolver) buildShardingKey(columns map[string]any) (*dbspi.ShardingKey, error) {
+// rangeCols provides hints about columns that appeared in range conditions (Gt/Lt/Gte/Lte),
+// enabling a more actionable error message when those columns are missing.
+func (r *shardingKeyResolver) buildShardingKey(columns map[string]any, rangeCols map[string]bool) (*dbspi.ShardingKey, error) {
 	var missing []string
+	var rangeHints []string
 	for _, col := range r.requiredCols {
 		if _, ok := columns[col]; !ok {
 			missing = append(missing, col)
+			if rangeCols[col] {
+				rangeHints = append(rangeHints, col)
+			}
 		}
 	}
 	if len(missing) > 0 {
+		if len(rangeHints) > 0 {
+			return nil, fmt.Errorf(
+				"sharding columns %v have range conditions (Gt/Lt/Between) which cannot determine a single shard; "+
+					"range conditions may cause cross-shard operations. "+
+					"Use Eq/In for sharding columns, set WithShardingKey(ctx, key), or use FindAll/CountAll for cross-shard queries",
+				rangeHints)
+		}
 		available := make([]string, 0, len(columns))
 		for k := range columns {
 			available = append(available, k)
@@ -405,7 +419,7 @@ func (e *shardedExecutor[T]) resolveForEntity(ctx context.Context, entity T) (db
 		if err != nil {
 			return nil, err
 		}
-		sk, err := e.keyResolver.buildShardingKey(columns)
+		sk, err := e.keyResolver.buildShardingKey(columns, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -431,7 +445,7 @@ func (e *shardedExecutor[T]) resolveForId(ctx context.Context, id any) (dbspi.Ex
 		if err != nil {
 			return nil, err
 		}
-		sk, err := e.keyResolver.buildShardingKey(columns)
+		sk, err := e.keyResolver.buildShardingKey(columns, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -448,7 +462,7 @@ func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Qu
 		return e.resolveExecutor(ctxSk)
 	}
 	if e.keyResolver != nil {
-		multiCols := e.keyResolver.fromQuery(query)
+		multiCols, rangeCols := e.keyResolver.fromQuery(query)
 		if hasCtx {
 			mergeSingleIntoMulti(multiCols, ctxSk.Fields())
 		}
@@ -456,7 +470,7 @@ func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Qu
 		if err != nil {
 			return nil, err
 		}
-		sk, err := e.keyResolver.buildShardingKey(columns)
+		sk, err := e.keyResolver.buildShardingKey(columns, rangeCols)
 		if err != nil {
 			return nil, err
 		}
@@ -474,7 +488,7 @@ func (e *shardedExecutor[T]) resolveForEntityAndQuery(ctx context.Context, entit
 	}
 	if e.keyResolver != nil {
 		entityCols := e.keyResolver.fromEntity(entity)
-		queryCols := e.keyResolver.fromQuery(query)
+		queryCols, rangeCols := e.keyResolver.fromQuery(query)
 		merged := mergeIntoMultiValues(entityCols, queryCols)
 		if hasCtx {
 			mergeSingleIntoMulti(merged, ctxSk.Fields())
@@ -483,7 +497,7 @@ func (e *shardedExecutor[T]) resolveForEntityAndQuery(ctx context.Context, entit
 		if err != nil {
 			return nil, err
 		}
-		sk, err := e.keyResolver.buildShardingKey(columns)
+		sk, err := e.keyResolver.buildShardingKey(columns, rangeCols)
 		if err != nil {
 			return nil, err
 		}
