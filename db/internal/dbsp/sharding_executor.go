@@ -151,17 +151,24 @@ func (r *shardingKeyResolver) buildShardingKey(columns map[string]any) (*dbspi.S
 	return sk, nil
 }
 
-// mergeIntoMultiValues merges single-value maps (from entity) into a multi-value map
+// mergeIntoMultiValues merges single-value maps (from entity/ctx) into a multi-value map
 // (from query extraction). All values are collected for later same-target validation.
-func mergeIntoMultiValues(entityCols map[string]any, queryCols map[string][]any) map[string][]any {
+func mergeIntoMultiValues(singleCols map[string]any, multiCols map[string][]any) map[string][]any {
 	result := make(map[string][]any)
-	for col, val := range entityCols {
+	for col, val := range singleCols {
 		result[col] = append(result[col], val)
 	}
-	for col, vals := range queryCols {
+	for col, vals := range multiCols {
 		result[col] = append(result[col], vals...)
 	}
 	return result
+}
+
+// mergeSingleIntoMulti appends all single-value entries into an existing multi-value map.
+func mergeSingleIntoMulti(base map[string][]any, singleCols map[string]any) {
+	for col, val := range singleCols {
+		base[col] = append(base[col], val)
+	}
 }
 
 // deduplicateValues returns the distinct values from the input slice,
@@ -381,45 +388,19 @@ func (e *shardedExecutor[T]) resolveFromCtx(ctx context.Context) (dbspi.Executor
 	return e.resolveExecutor(sk)
 }
 
-// resolveForEntity resolves using: ctx key > entity struct fields.
+// resolveForEntity resolves by aggregating ctx key + entity struct fields,
+// then validating all values route to the same target.
 func (e *shardedExecutor[T]) resolveForEntity(ctx context.Context, entity T) (dbspi.Executor[T], error) {
-	if sk, ok := dbspi.ShardingKeyFromCtx(ctx); ok {
-		return e.resolveExecutor(sk)
+	ctxSk, hasCtx := dbspi.ShardingKeyFromCtx(ctx)
+	if hasCtx && e.keyResolver == nil {
+		return e.resolveExecutor(ctxSk)
 	}
 	if e.keyResolver != nil {
-		columns := e.keyResolver.fromEntity(entity)
-		sk, err := e.keyResolver.buildShardingKey(columns)
-		if err != nil {
-			return nil, err
+		entityCols := e.keyResolver.fromEntity(entity)
+		multiCols := mergeIntoMultiValues(entityCols, nil)
+		if hasCtx {
+			mergeSingleIntoMulti(multiCols, ctxSk.Fields())
 		}
-		return e.resolveExecutor(sk)
-	}
-	return nil, dbspi.ErrShardingKeyRequired
-}
-
-// resolveForId resolves using: ctx key > id parameter.
-func (e *shardedExecutor[T]) resolveForId(ctx context.Context, id any) (dbspi.Executor[T], error) {
-	if sk, ok := dbspi.ShardingKeyFromCtx(ctx); ok {
-		return e.resolveExecutor(sk)
-	}
-	if e.keyResolver != nil {
-		columns := e.keyResolver.fromId(id)
-		sk, err := e.keyResolver.buildShardingKey(columns)
-		if err != nil {
-			return nil, err
-		}
-		return e.resolveExecutor(sk)
-	}
-	return nil, dbspi.ErrShardingKeyRequired
-}
-
-// resolveForQuery resolves using: ctx key > query Eq conditions.
-func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Query) (dbspi.Executor[T], error) {
-	if sk, ok := dbspi.ShardingKeyFromCtx(ctx); ok {
-		return e.resolveExecutor(sk)
-	}
-	if e.keyResolver != nil {
-		multiCols := e.keyResolver.fromQuery(query)
 		columns, err := e.reduceColumns(multiCols)
 		if err != nil {
 			return nil, err
@@ -433,15 +414,71 @@ func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Qu
 	return nil, dbspi.ErrShardingKeyRequired
 }
 
-// resolveForEntityAndQuery resolves using: ctx key > entity + query (merged, with same-target validation).
-func (e *shardedExecutor[T]) resolveForEntityAndQuery(ctx context.Context, entity T, query dbspi.Query) (dbspi.Executor[T], error) {
-	if sk, ok := dbspi.ShardingKeyFromCtx(ctx); ok {
+// resolveForId resolves by aggregating ctx key + id parameter,
+// then validating all values route to the same target.
+func (e *shardedExecutor[T]) resolveForId(ctx context.Context, id any) (dbspi.Executor[T], error) {
+	ctxSk, hasCtx := dbspi.ShardingKeyFromCtx(ctx)
+	if hasCtx && e.keyResolver == nil {
+		return e.resolveExecutor(ctxSk)
+	}
+	if e.keyResolver != nil {
+		idCols := e.keyResolver.fromId(id)
+		multiCols := mergeIntoMultiValues(idCols, nil)
+		if hasCtx {
+			mergeSingleIntoMulti(multiCols, ctxSk.Fields())
+		}
+		columns, err := e.reduceColumns(multiCols)
+		if err != nil {
+			return nil, err
+		}
+		sk, err := e.keyResolver.buildShardingKey(columns)
+		if err != nil {
+			return nil, err
+		}
 		return e.resolveExecutor(sk)
+	}
+	return nil, dbspi.ErrShardingKeyRequired
+}
+
+// resolveForQuery resolves by aggregating ctx key + query conditions,
+// then validating all values route to the same target.
+func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Query) (dbspi.Executor[T], error) {
+	ctxSk, hasCtx := dbspi.ShardingKeyFromCtx(ctx)
+	if hasCtx && e.keyResolver == nil {
+		return e.resolveExecutor(ctxSk)
+	}
+	if e.keyResolver != nil {
+		multiCols := e.keyResolver.fromQuery(query)
+		if hasCtx {
+			mergeSingleIntoMulti(multiCols, ctxSk.Fields())
+		}
+		columns, err := e.reduceColumns(multiCols)
+		if err != nil {
+			return nil, err
+		}
+		sk, err := e.keyResolver.buildShardingKey(columns)
+		if err != nil {
+			return nil, err
+		}
+		return e.resolveExecutor(sk)
+	}
+	return nil, dbspi.ErrShardingKeyRequired
+}
+
+// resolveForEntityAndQuery resolves by aggregating ctx key + entity + query,
+// then validating all values route to the same target.
+func (e *shardedExecutor[T]) resolveForEntityAndQuery(ctx context.Context, entity T, query dbspi.Query) (dbspi.Executor[T], error) {
+	ctxSk, hasCtx := dbspi.ShardingKeyFromCtx(ctx)
+	if hasCtx && e.keyResolver == nil {
+		return e.resolveExecutor(ctxSk)
 	}
 	if e.keyResolver != nil {
 		entityCols := e.keyResolver.fromEntity(entity)
 		queryCols := e.keyResolver.fromQuery(query)
 		merged := mergeIntoMultiValues(entityCols, queryCols)
+		if hasCtx {
+			mergeSingleIntoMulti(merged, ctxSk.Fields())
+		}
 		columns, err := e.reduceColumns(merged)
 		if err != nil {
 			return nil, err

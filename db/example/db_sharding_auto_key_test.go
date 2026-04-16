@@ -327,9 +327,9 @@ func Test_AutoKey_DeleteById_FromId(t *testing.T) {
 	t.Logf("DeleteById auto-extract from id: err=%v", err)
 }
 
-// ==================== Backward compatibility: explicit key takes priority ====================
+// ==================== Ctx key + auto-extract aggregation ====================
 
-func Test_AutoKey_ExplicitKeyPriority(t *testing.T) {
+func Test_AutoKey_CtxAndEntity_SameTable(t *testing.T) {
 	db := testNewDb()
 
 	executor := dbhelper.NewShardedExecutor(&Order{},
@@ -342,12 +342,121 @@ func Test_AutoKey_ExplicitKeyPriority(t *testing.T) {
 		)),
 	)
 
-	// Explicit sharding key in ctx should be used, not the entity's ShopID
+	// ctx key shop_id=22345 (%10=5), entity ShopID=12345 (%10=5) → same table → OK
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(22345))
+	ctx := dbspi.WithShardingKey(context.Background(), sk)
+
+	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	if err != nil {
+		t.Fatalf("Ctx and entity same table should succeed, got: %v", err)
+	}
+	t.Logf("Ctx + entity same table: err=%v", err)
+}
+
+func Test_AutoKey_CtxAndEntity_CrossShard(t *testing.T) {
+	db := testNewDb()
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	// ctx key shop_id=99999 (%10=9), entity ShopID=12345 (%10=5) → different tables → error
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(99999))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
-	t.Logf("Explicit key priority over entity: err=%v", err)
+	if err == nil {
+		t.Fatal("Expected cross-shard error when ctx key and entity differ")
+	}
+	if !strings.Contains(err.Error(), "cross-shard") {
+		t.Fatalf("Error should mention 'cross-shard', got: %v", err)
+	}
+	t.Logf("Ctx + entity cross-shard: %v", err)
+}
+
+func Test_AutoKey_CtxAndQuery_SameTable(t *testing.T) {
+	db := testNewDb()
+
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	// ctx key shop_id=22345 (%10=5), query shop_id=12345 (%10=5) → same table → OK
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(22345))
+	ctx := dbspi.WithShardingKey(context.Background(), sk)
+
+	shopId := int64(12345)
+	orders, err := executor.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+	if err != nil {
+		t.Fatalf("Ctx and query same table should succeed, got: %v", err)
+	}
+	t.Logf("Ctx + query same table: orders=%v, err=%v", orders, err)
+}
+
+func Test_AutoKey_CtxAndQuery_CrossShard(t *testing.T) {
+	db := testNewDb()
+
+	shopIdField := dbhelper.NewField[int64]("shop_id")
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	// ctx key shop_id=99999 (%10=9), query shop_id=12345 (%10=5) → different tables → error
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(99999))
+	ctx := dbspi.WithShardingKey(context.Background(), sk)
+
+	shopId := int64(12345)
+	_, err := executor.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+	if err == nil {
+		t.Fatal("Expected cross-shard error when ctx key and query differ")
+	}
+	if !strings.Contains(err.Error(), "cross-shard") {
+		t.Fatalf("Error should mention 'cross-shard', got: %v", err)
+	}
+	t.Logf("Ctx + query cross-shard: %v", err)
+}
+
+func Test_AutoKey_CtxOnly_StillWorks(t *testing.T) {
+	db := testNewDb()
+
+	executor := dbhelper.NewShardedExecutor(&Order{},
+		dbhelper.WithDbs(dbhelper.SingleDb(db)),
+		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
+			"order_tab_${index}",
+			"${idx} := range(0, 10)",
+			"${idx} = @{shop_id} % 10",
+			"${index} = fill(${idx}, 8)",
+		)),
+	)
+
+	// Only ctx key, no conflicting sources → should work as before
+	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
+	ctx := dbspi.WithShardingKey(context.Background(), sk)
+
+	// Raw/Exec only uses ctx key (no auto-extraction possible)
+	err := executor.Exec(ctx, "SELECT 1")
+	t.Logf("Ctx-only Raw/Exec: err=%v", err)
 }
 
 // ==================== Composite key: auto-extract all fields from entity ====================
