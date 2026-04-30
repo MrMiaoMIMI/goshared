@@ -53,17 +53,7 @@ var OrderFields = struct {
 
 func Test_Sharding_TableOnly_WithShard(t *testing.T) {
 	ctx := context.Background()
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 
@@ -85,17 +75,7 @@ func Test_Sharding_TableOnly_WithShard(t *testing.T) {
 // ==================== Example 2: Table-only sharding via ctx ====================
 
 func Test_Sharding_TableOnly_WithCtx(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 8)",
-			"${idx} = @{shop_id} % 8",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(8)
 
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
@@ -113,17 +93,7 @@ func Test_Sharding_TableOnly_WithCtx(t *testing.T) {
 // ==================== Example 3: Missing sharding key ====================
 
 func Test_Sharding_MissingKey(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 8)",
-			"${idx} = @{shop_id} % 8",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(8)
 
 	ctx := context.Background()
 	_, err := executor.GetById(ctx, 1001)
@@ -133,17 +103,7 @@ func Test_Sharding_MissingKey(t *testing.T) {
 // ==================== Example 4: Scatter-gather ====================
 
 func Test_Sharding_FindAll(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 
@@ -160,23 +120,7 @@ func Test_Sharding_FindAll(t *testing.T) {
 // ==================== Example 5: Database + Table sharding ====================
 
 func Test_Sharding_DbAndTable(t *testing.T) {
-	db0 := testNewDb()
-	db1 := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.IndexedDbs(db0, db1)),
-		dbhelper.WithDbRule(dbhelper.NewExprDbRule(
-			"${idx}",
-			"${idx} := range(0, 2)",
-			"${idx} = @{shop_id} % 2",
-		)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderDbTableExecutor()
 
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
@@ -188,20 +132,7 @@ func Test_Sharding_DbAndTable(t *testing.T) {
 // ==================== Example 6: Region-based DB sharding ====================
 
 func Test_Sharding_RegionDb(t *testing.T) {
-	dbSG := testNewDb()
-	dbTH := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.NamedDbs(map[string]dbspi.Db{
-			"order_SG_db": dbSG,
-			"order_TH_db": dbTH,
-		})),
-		dbhelper.WithDbRule(dbhelper.NewExprDbRule(
-			"order_${region}_db",
-			"${region} := enum(SG, TH)",
-			"${region} = @{region}",
-		)),
-	)
+	executor := newOrderRegionDbExecutor()
 
 	sk := dbspi.NewShardingKey().Set(OrderFields.Region, "SG")
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
@@ -236,26 +167,7 @@ func Test_Sharding_NonShardedExecutor(t *testing.T) {
 // ==================== Example 8: Composite sharding key (db + table use different fields) ====================
 
 func Test_Sharding_CompositeKey(t *testing.T) {
-	dbSG := testNewDb()
-	dbTH := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.NamedDbs(map[string]dbspi.Db{
-			"SG": dbSG,
-			"TH": dbTH,
-		})),
-		dbhelper.WithDbRule(dbhelper.NewExprDbRule(
-			"${region}",
-			"${region} := enum(SG, TH)",
-			"${region} = @{region}",
-		)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderRegionRequiredExecutor()
 
 	sk := dbspi.NewShardingKey().
 		Set(OrderFields.Region, "SG").

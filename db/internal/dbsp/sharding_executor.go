@@ -344,6 +344,14 @@ func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *sh
 	}
 }
 
+func toEnhancedExecutor[T dbspi.Entity](exec dbspi.Executor[T]) (dbspi.EnhancedExecutor[T], error) {
+	enhanced, ok := exec.(dbspi.EnhancedExecutor[T])
+	if !ok {
+		return nil, fmt.Errorf("resolved executor does not implement EnhancedExecutor")
+	}
+	return enhanced, nil
+}
+
 // findDb looks up the Db by matching the target key string.
 func (e *shardedExecutor[T]) findDb(targetKey string) (dbspi.Db, error) {
 	for _, dt := range e.dbs {
@@ -552,6 +560,44 @@ func (e *shardedExecutor[T]) DeleteById(ctx context.Context, id any) error {
 	return exec.DeleteById(ctx, id)
 }
 
+func (e *shardedExecutor[T]) SoftDeleteById(ctx context.Context, id any) error {
+	exec, err := e.resolveForId(ctx, id)
+	if err != nil {
+		return err
+	}
+	enhanced, err := toEnhancedExecutor(exec)
+	if err != nil {
+		return err
+	}
+	return enhanced.SoftDeleteById(ctx, id)
+}
+
+func (e *shardedExecutor[T]) RecoverFromDeletedById(ctx context.Context, id any) error {
+	exec, err := e.resolveForId(ctx, id)
+	if err != nil {
+		return err
+	}
+	enhanced, err := toEnhancedExecutor(exec)
+	if err != nil {
+		return err
+	}
+	return enhanced.RecoverFromDeletedById(ctx, id)
+}
+
+func (e *shardedExecutor[T]) ExistsByIdWithoutDeleted(ctx context.Context, id any) (bool, T, error) {
+	exec, err := e.resolveForId(ctx, id)
+	if err != nil {
+		var zero T
+		return false, zero, err
+	}
+	enhanced, err := toEnhancedExecutor(exec)
+	if err != nil {
+		var zero T
+		return false, zero, err
+	}
+	return enhanced.ExistsByIdWithoutDeleted(ctx, id)
+}
+
 // -- Query-based methods (resolve from ctx > query) --
 
 func (e *shardedExecutor[T]) Find(ctx context.Context, query dbspi.Query, pagenation dbspi.PaginationConfig) ([]T, error) {
@@ -593,6 +639,68 @@ func (e *shardedExecutor[T]) DeleteByQuery(ctx context.Context, query dbspi.Quer
 		return err
 	}
 	return exec.DeleteByQuery(ctx, query)
+}
+
+func (e *shardedExecutor[T]) SoftDeleteByQuery(ctx context.Context, query dbspi.Query) error {
+	exec, err := e.resolveForQuery(ctx, query)
+	if err != nil {
+		return err
+	}
+	enhanced, err := toEnhancedExecutor(exec)
+	if err != nil {
+		return err
+	}
+	return enhanced.SoftDeleteByQuery(ctx, query)
+}
+
+func (e *shardedExecutor[T]) RecoverFromDeletedByQuery(ctx context.Context, query dbspi.Query) error {
+	exec, err := e.resolveForQuery(ctx, query)
+	if err != nil {
+		return err
+	}
+	enhanced, err := toEnhancedExecutor(exec)
+	if err != nil {
+		return err
+	}
+	return enhanced.RecoverFromDeletedByQuery(ctx, query)
+}
+
+func (e *shardedExecutor[T]) FindWithoutDeleted(ctx context.Context, query dbspi.Query, pagenation dbspi.PaginationConfig) ([]T, error) {
+	exec, err := e.resolveForQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	enhanced, err := toEnhancedExecutor(exec)
+	if err != nil {
+		return nil, err
+	}
+	return enhanced.FindWithoutDeleted(ctx, query, pagenation)
+}
+
+func (e *shardedExecutor[T]) CountWithoutDeleted(ctx context.Context, query dbspi.Query) (uint64, error) {
+	exec, err := e.resolveForQuery(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	enhanced, err := toEnhancedExecutor(exec)
+	if err != nil {
+		return 0, err
+	}
+	return enhanced.CountWithoutDeleted(ctx, query)
+}
+
+func (e *shardedExecutor[T]) ExistsWithoutDeleted(ctx context.Context, query dbspi.Query) (bool, T, error) {
+	exec, err := e.resolveForQuery(ctx, query)
+	if err != nil {
+		var zero T
+		return false, zero, err
+	}
+	enhanced, err := toEnhancedExecutor(exec)
+	if err != nil {
+		var zero T
+		return false, zero, err
+	}
+	return enhanced.ExistsWithoutDeleted(ctx, query)
 }
 
 // -- Entity-based methods (resolve from ctx > entity) --

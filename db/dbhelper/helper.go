@@ -12,18 +12,25 @@ func NewDb(dbConfig dbspi.DbConfig) dbspi.Db {
 	return dbsp.NewGormDb(dbConfig)
 }
 
-// DbConfigOption is a type alias so callers don't need to import the internal package.
-type DbConfigOption = dbsp.DbConfigOption
+// DbConfigOption configures DbConfig construction.
+type DbConfigOption func(*dbConfigOptions)
+
+type dbConfigOptions struct {
+	maxOpenConns           *int
+	maxIdleConns           *int
+	connMaxLifetimeSeconds *int
+	debugMode              *bool
+}
 
 // NewDbConfig creates a DbConfig, used for NewDb
 func NewDbConfig(host string, port uint, user string, password string, dbName string, opts ...DbConfigOption) dbspi.DbConfig {
-	return dbsp.NewDbConfig(host, port, user, password, dbName, opts...)
+	return dbsp.NewDbConfig(host, port, user, password, dbName, toDbspConfigOptions(opts)...)
 }
 
 // NewDbConfigFromDSN creates a DbConfig from a raw DSN string.
 // Example: NewDbConfigFromDSN("root:pass@tcp(10.0.0.1:3306)/mydb?charset=utf8mb4&parseTime=True&loc=Local")
 func NewDbConfigFromDSN(dsn string, opts ...DbConfigOption) dbspi.DbConfig {
-	return dbsp.NewDbConfigFromDSN(dsn, opts...)
+	return dbsp.NewDbConfigFromDSN(dsn, toDbspConfigOptions(opts)...)
 }
 
 // NewDbFromDSN creates a Db instance from a raw DSN string.
@@ -32,20 +39,55 @@ func NewDbFromDSN(dsn string, opts ...DbConfigOption) dbspi.Db {
 }
 
 // WithMaxOpenConns sets the maximum number of open connections to the database.
-func WithMaxOpenConns(n int) DbConfigOption { return dbsp.WithMaxOpenConns(n) }
+func WithMaxOpenConns(n int) DbConfigOption {
+	return func(o *dbConfigOptions) {
+		o.maxOpenConns = &n
+	}
+}
 
 // WithMaxIdleConns sets the maximum number of idle connections in the pool.
-func WithMaxIdleConns(n int) DbConfigOption { return dbsp.WithMaxIdleConns(n) }
+func WithMaxIdleConns(n int) DbConfigOption {
+	return func(o *dbConfigOptions) {
+		o.maxIdleConns = &n
+	}
+}
 
 // WithConnMaxLifetimeSeconds sets the maximum lifetime of a connection in seconds.
-func WithConnMaxLifetimeSeconds(s int) DbConfigOption { return dbsp.WithConnMaxLifetimeSeconds(s) }
+func WithConnMaxLifetimeSeconds(s int) DbConfigOption {
+	return func(o *dbConfigOptions) {
+		o.connMaxLifetimeSeconds = &s
+	}
+}
 
 // WithDebugMode enables or disables GORM debug logging.
-func WithDebugMode(debug bool) DbConfigOption { return dbsp.WithDebugMode(debug) }
+func WithDebugMode(debug bool) DbConfigOption {
+	return func(o *dbConfigOptions) {
+		o.debugMode = &debug
+	}
+}
 
-// NewColumn creates a simple Column reference for use with ShardingKey.Set.
-func NewColumn(name string) dbspi.Column {
-	return dbsp.NewColumn(name)
+func toDbspConfigOptions(opts []DbConfigOption) []dbsp.DbConfigOption {
+	values := &dbConfigOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(values)
+		}
+	}
+
+	internalOpts := make([]dbsp.DbConfigOption, 0, 4)
+	if values.maxOpenConns != nil {
+		internalOpts = append(internalOpts, dbsp.WithMaxOpenConns(*values.maxOpenConns))
+	}
+	if values.maxIdleConns != nil {
+		internalOpts = append(internalOpts, dbsp.WithMaxIdleConns(*values.maxIdleConns))
+	}
+	if values.connMaxLifetimeSeconds != nil {
+		internalOpts = append(internalOpts, dbsp.WithConnMaxLifetimeSeconds(*values.connMaxLifetimeSeconds))
+	}
+	if values.debugMode != nil {
+		internalOpts = append(internalOpts, dbsp.WithDebugMode(*values.debugMode))
+	}
+	return internalOpts
 }
 
 // NewField creates a T type field, used for query and update

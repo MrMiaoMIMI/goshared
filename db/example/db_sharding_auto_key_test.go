@@ -24,17 +24,7 @@ func (*RegionalOrder) IdFiledName() string { return "id" }
 // ==================== Auto-extract from Entity ====================
 
 func Test_AutoKey_Create_FromEntity(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
@@ -42,17 +32,7 @@ func Test_AutoKey_Create_FromEntity(t *testing.T) {
 }
 
 func Test_AutoKey_Save_FromEntity(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	err := executor.Save(ctx, &Order{ShopID: 12345, Amount: 200})
@@ -60,17 +40,7 @@ func Test_AutoKey_Save_FromEntity(t *testing.T) {
 }
 
 func Test_AutoKey_Update_FromEntity(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	err := executor.Update(ctx, &Order{ID: 1, ShopID: 12345, Amount: 300})
@@ -78,17 +48,7 @@ func Test_AutoKey_Update_FromEntity(t *testing.T) {
 }
 
 func Test_AutoKey_Delete_FromEntity(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	err := executor.Delete(ctx, &Order{ID: 1, ShopID: 12345})
@@ -96,17 +56,7 @@ func Test_AutoKey_Delete_FromEntity(t *testing.T) {
 }
 
 func Test_AutoKey_BatchCreate_FromEntity(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	entities := []*Order{
@@ -118,17 +68,7 @@ func Test_AutoKey_BatchCreate_FromEntity(t *testing.T) {
 }
 
 func Test_AutoKey_BatchCreate_EmptySlice(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	err := executor.BatchCreate(ctx, []*Order{}, 100)
@@ -141,19 +81,9 @@ func Test_AutoKey_BatchCreate_EmptySlice(t *testing.T) {
 // ==================== Auto-extract from Query ====================
 
 func Test_AutoKey_Find_FromQuery(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -162,19 +92,9 @@ func Test_AutoKey_Find_FromQuery(t *testing.T) {
 }
 
 func Test_AutoKey_Count_FromQuery(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -183,19 +103,9 @@ func Test_AutoKey_Count_FromQuery(t *testing.T) {
 }
 
 func Test_AutoKey_Exists_FromQuery(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -204,19 +114,9 @@ func Test_AutoKey_Exists_FromQuery(t *testing.T) {
 }
 
 func Test_AutoKey_DeleteByQuery_FromQuery(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -227,20 +127,10 @@ func Test_AutoKey_DeleteByQuery_FromQuery(t *testing.T) {
 // ==================== Auto-extract from Query (nested) ====================
 
 func Test_AutoKey_Find_FromNestedQuery(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	statusField := dbhelper.NewField[int]("status")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -255,21 +145,11 @@ func Test_AutoKey_Find_FromNestedQuery(t *testing.T) {
 }
 
 func Test_AutoKey_Find_FromMixedQuery(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	statusField := dbhelper.NewField[int]("status")
 	amountField := dbhelper.NewField[int64]("amount")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -291,18 +171,8 @@ func Test_AutoKey_Find_FromMixedQuery(t *testing.T) {
 // ==================== Auto-extract from ID ====================
 
 func Test_AutoKey_GetById_FromId(t *testing.T) {
-	db := testNewDb()
-
 	// Shard by ID column
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderIDTableExecutor(10)
 
 	ctx := context.Background()
 	order, err := executor.GetById(ctx, int64(1001))
@@ -310,17 +180,7 @@ func Test_AutoKey_GetById_FromId(t *testing.T) {
 }
 
 func Test_AutoKey_DeleteById_FromId(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderIDTableExecutor(10)
 
 	ctx := context.Background()
 	err := executor.DeleteById(ctx, int64(1001))
@@ -330,17 +190,7 @@ func Test_AutoKey_DeleteById_FromId(t *testing.T) {
 // ==================== Ctx key + auto-extract aggregation ====================
 
 func Test_AutoKey_CtxAndEntity_SameTable(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	// ctx key shop_id=22345 (%10=5), entity ShopID=12345 (%10=5) → same table → OK
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(22345))
@@ -354,17 +204,7 @@ func Test_AutoKey_CtxAndEntity_SameTable(t *testing.T) {
 }
 
 func Test_AutoKey_CtxAndEntity_CrossShard(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	// ctx key shop_id=99999 (%10=9), entity ShopID=12345 (%10=5) → different tables → error
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(99999))
@@ -381,19 +221,9 @@ func Test_AutoKey_CtxAndEntity_CrossShard(t *testing.T) {
 }
 
 func Test_AutoKey_CtxAndQuery_SameTable(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	// ctx key shop_id=22345 (%10=5), query shop_id=12345 (%10=5) → same table → OK
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(22345))
@@ -408,19 +238,9 @@ func Test_AutoKey_CtxAndQuery_SameTable(t *testing.T) {
 }
 
 func Test_AutoKey_CtxAndQuery_CrossShard(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	// ctx key shop_id=99999 (%10=9), query shop_id=12345 (%10=5) → different tables → error
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(99999))
@@ -438,17 +258,7 @@ func Test_AutoKey_CtxAndQuery_CrossShard(t *testing.T) {
 }
 
 func Test_AutoKey_CtxOnly_StillWorks(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	// Only ctx key, no conflicting sources → should work as before
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
@@ -462,26 +272,7 @@ func Test_AutoKey_CtxOnly_StillWorks(t *testing.T) {
 // ==================== Composite key: auto-extract all fields from entity ====================
 
 func Test_AutoKey_CompositeKey_FromEntity(t *testing.T) {
-	dbSG := testNewDb()
-	dbTH := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&RegionalOrder{},
-		dbhelper.WithDbs(dbhelper.NamedDbs(map[string]dbspi.Db{
-			"SG": dbSG,
-			"TH": dbTH,
-		})),
-		dbhelper.WithDbRule(dbhelper.NewExprDbRule(
-			"${region}",
-			"${region} := enum(SG, TH)",
-			"${region} = @{region}",
-		)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newRegionalOrderCompositeExecutor()
 
 	ctx := context.Background()
 	err := executor.Create(ctx, &RegionalOrder{ShopID: 12345, Region: "SG", Amount: 100})
@@ -491,27 +282,8 @@ func Test_AutoKey_CompositeKey_FromEntity(t *testing.T) {
 // ==================== Missing column: entity lacks required field ====================
 
 func Test_AutoKey_MissingColumn_EntityLacksRegion(t *testing.T) {
-	dbSG := testNewDb()
-	dbTH := testNewDb()
-
 	// Order struct has no "region" field, but db rule requires @{region}
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.NamedDbs(map[string]dbspi.Db{
-			"SG": dbSG,
-			"TH": dbTH,
-		})),
-		dbhelper.WithDbRule(dbhelper.NewExprDbRule(
-			"${region}",
-			"${region} := enum(SG, TH)",
-			"${region} = @{region}",
-		)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderRegionRequiredExecutor()
 
 	ctx := context.Background()
 	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
@@ -527,19 +299,9 @@ func Test_AutoKey_MissingColumn_EntityLacksRegion(t *testing.T) {
 // ==================== Same-table validation (values route to same shard) ====================
 
 func Test_AutoKey_QuerySameTable_DifferentValues(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 21111 % 10 = 1 → same table → allowed
@@ -555,19 +317,9 @@ func Test_AutoKey_QuerySameTable_DifferentValues(t *testing.T) {
 }
 
 func Test_AutoKey_QueryCrossShard_DifferentValues(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
@@ -586,20 +338,10 @@ func Test_AutoKey_QueryCrossShard_DifferentValues(t *testing.T) {
 }
 
 func Test_AutoKey_QueryCrossShard_NestedDifferentValues(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	statusField := dbhelper.NewField[int]("status")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
@@ -622,19 +364,9 @@ func Test_AutoKey_QueryCrossShard_NestedDifferentValues(t *testing.T) {
 }
 
 func Test_AutoKey_QueryNoConflict_SameValue(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -648,19 +380,9 @@ func Test_AutoKey_QueryNoConflict_SameValue(t *testing.T) {
 // ==================== Cross-source conflict (FirstOrCreate) ====================
 
 func Test_AutoKey_FirstOrCreate_EntityAndQuery_NoConflict(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -674,19 +396,9 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_NoConflict(t *testing.T) {
 }
 
 func Test_AutoKey_FirstOrCreate_EntityAndQuery_CrossShard(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	// Entity shop_id=12345 (% 10 = 5), query shop_id=99999 (% 10 = 9) → different tables
@@ -706,19 +418,9 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_CrossShard(t *testing.T) {
 }
 
 func Test_AutoKey_FirstOrCreate_EntityAndQuery_SameTable(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	// Entity shop_id=12345 (% 10 = 5), query shop_id=22345 (% 10 = 5) → same table → OK
@@ -734,19 +436,9 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_SameTable(t *testing.T) {
 // ==================== OR query: now extractable with same-target validation ====================
 
 func Test_AutoKey_OrQuery_SameTable(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 21111 % 10 = 1 → same table → allowed
@@ -762,19 +454,9 @@ func Test_AutoKey_OrQuery_SameTable(t *testing.T) {
 }
 
 func Test_AutoKey_InQuery_SameTable(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 21111 % 10 = 1 → same table → allowed
@@ -790,19 +472,9 @@ func Test_AutoKey_InQuery_SameTable(t *testing.T) {
 }
 
 func Test_AutoKey_OrQuery_CrossShard(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
@@ -821,19 +493,9 @@ func Test_AutoKey_OrQuery_CrossShard(t *testing.T) {
 }
 
 func Test_AutoKey_InQuery_CrossShard(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
@@ -852,20 +514,10 @@ func Test_AutoKey_InQuery_CrossShard(t *testing.T) {
 }
 
 func Test_AutoKey_MixedQuery_OrWithAndSameTable(t *testing.T) {
-	db := testNewDb()
-
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	statusField := dbhelper.NewField[int]("status")
 
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -888,17 +540,7 @@ func Test_AutoKey_MixedQuery_OrWithAndSameTable(t *testing.T) {
 // ==================== Nil query: columns not extractable ====================
 
 func Test_AutoKey_NilQuery_MissingColumn(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	_, err := executor.Find(ctx, nil, nil)
@@ -914,19 +556,19 @@ func Test_AutoKey_NilQuery_MissingColumn(t *testing.T) {
 // ==================== DbManager + auto-extract ====================
 
 func Test_AutoKey_DbManager_CreateWithoutExplicitKey(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
-		Databases: map[string]dbhelper.DatabaseEntry{
+	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
 			"default": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword, Debug: true,
 				DbName: testAppDbName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword, Debug: true,
-				DbSharding: &dbhelper.DbShardConfig{
+				DbSharding: &dbspi.DbShardConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
-				TableSharding: &dbhelper.TableShardConfig{
+				TableSharding: &dbspi.TableShardConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
@@ -942,19 +584,19 @@ func Test_AutoKey_DbManager_CreateWithoutExplicitKey(t *testing.T) {
 }
 
 func Test_AutoKey_DbManager_FindWithQuery(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
-		Databases: map[string]dbhelper.DatabaseEntry{
+	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
 			"default": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbSharding: &dbhelper.DbShardConfig{
+				DbSharding: &dbspi.DbShardConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
-				TableSharding: &dbhelper.TableShardConfig{
+				TableSharding: &dbspi.TableShardConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
@@ -974,17 +616,7 @@ func Test_AutoKey_DbManager_FindWithQuery(t *testing.T) {
 // ==================== ${table} Variable Tests ====================
 
 func Test_TableVar_ResolveTable(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"${table}_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newTableVarExecutor(&Order{}, 10)
 
 	ctx := context.Background()
 	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
@@ -1003,23 +635,8 @@ func (*OrderDetailTab) DbKey() string       { return "order_dbs" }
 func (*OrderDetailTab) IdFiledName() string { return "id" }
 
 func Test_TableVar_DifferentEntitiesSameRule(t *testing.T) {
-	db := testNewDb()
-
-	rule := dbhelper.NewExprTableRule(
-		"${table}_${index}",
-		"${idx} := range(0, 10)",
-		"${idx} = @{shop_id} % 10",
-		"${index} = fill(${idx}, 8)",
-	)
-
-	orderExec := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(rule),
-	)
-	detailExec := dbhelper.NewShardedExecutor(&OrderDetailTab{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(rule),
-	)
+	orderExec := newTableVarExecutor(&Order{}, 10)
+	detailExec := newTableVarExecutor(&OrderDetailTab{}, 10)
 
 	ctx := context.Background()
 	err1 := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
@@ -1029,22 +646,22 @@ func Test_TableVar_DifferentEntitiesSameRule(t *testing.T) {
 }
 
 func Test_TableVar_EntityRuleInheritNameExpr(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
-		Databases: map[string]dbhelper.DatabaseEntry{
+	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
 			"default": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				TableSharding: &dbhelper.TableShardConfig{
+				TableSharding: &dbspi.TableShardConfig{
 					NameExpr:    "${table}_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
-				EntityRules: []dbhelper.EntityRule{
+				EntityRules: []dbspi.EntityRule{
 					{
 						Tables: []string{"order_detail_tab"},
-						TableSharding: &dbhelper.TableShardConfig{
+						TableSharding: &dbspi.TableShardConfig{
 							ExpandExprs: []string{"${idx} := range(0, 20)", "${idx} = @{shop_id} % 20", "${index} = fill(${idx}, 8)"},
 						},
 					},
@@ -1067,17 +684,7 @@ func Test_TableVar_EntityRuleInheritNameExpr(t *testing.T) {
 // ==================== Range Condition Detection Tests ====================
 
 func Test_AutoKey_RangeCondition_Detected(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopIdField := dbhelper.NewField[int64]("shop_id")
@@ -1094,17 +701,7 @@ func Test_AutoKey_RangeCondition_Detected(t *testing.T) {
 }
 
 func Test_AutoKey_RangeCondition_LtDetected(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopIdField := dbhelper.NewField[int64]("shop_id")
@@ -1121,17 +718,7 @@ func Test_AutoKey_RangeCondition_LtDetected(t *testing.T) {
 }
 
 func Test_AutoKey_RangeCondition_WithEqOk(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopIdField := dbhelper.NewField[int64]("shop_id")
@@ -1145,17 +732,7 @@ func Test_AutoKey_RangeCondition_WithEqOk(t *testing.T) {
 }
 
 func Test_AutoKey_RangeCondition_BetweenDetected(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewShardedExecutor(&Order{},
-		dbhelper.WithDbs(dbhelper.SingleDb(db)),
-		dbhelper.WithTableRule(dbhelper.NewExprTableRule(
-			"order_tab_${index}",
-			"${idx} := range(0, 10)",
-			"${idx} = @{shop_id} % 10",
-			"${index} = fill(${idx}, 8)",
-		)),
-	)
+	executor := newOrderShopTableExecutor(10)
 
 	ctx := context.Background()
 	shopIdField := dbhelper.NewField[int64]("shop_id")

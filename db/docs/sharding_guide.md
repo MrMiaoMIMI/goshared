@@ -325,10 +325,11 @@ databases:
 import (
     "gopkg.in/yaml.v3"
     "github.com/MrMiaoMIMI/goshared/db/dbhelper"
+    "github.com/MrMiaoMIMI/goshared/db/dbspi"
 )
 
 // 加载 YAML 配置
-var cfg dbhelper.DatabaseConfig
+var cfg dbspi.DatabaseConfig
 yaml.Unmarshal(configBytes, &cfg)
 
 // 创建 DbManager 并设为全局默认
@@ -757,7 +758,7 @@ func (*Order) IdFiledName() string { return "id" }
 func main() {
     // 1. 加载配置
     data, _ := os.ReadFile("config.yaml")
-    var cfg dbhelper.DatabaseConfig
+    var cfg dbspi.DatabaseConfig
     yaml.Unmarshal(data, &cfg)
 
     // 2. 初始化 DbManager

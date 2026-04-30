@@ -48,8 +48,8 @@ func (*OrderDetail) IdFiledName() string { return "id" }
 // ==================== DbManager: Non-sharded ====================
 
 func Test_DbManager_Simple(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
-		Databases: map[string]dbhelper.DatabaseEntry{
+	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
 			"default": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
@@ -64,11 +64,28 @@ func Test_DbManager_Simple(t *testing.T) {
 	t.Logf("DbManager simple: users=%v, err=%v", users, err)
 }
 
+func Test_DbManager_ForEnhance_Simple(t *testing.T) {
+	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
+			"default": {
+				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+				DbName: testAppDbName,
+			},
+		},
+	})
+
+	userExec := dbhelper.ForEnhance(&User{}, mgr)
+
+	ctx := context.Background()
+	count, err := userExec.CountWithoutDeleted(ctx, nil)
+	t.Logf("DbManager ForEnhance simple: count=%d, err=%v", count, err)
+}
+
 // ==================== DbManager: DSN mode ====================
 
 func Test_DbManager_DSN(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
-		Databases: map[string]dbhelper.DatabaseEntry{
+	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
 			"default": {
 				DSN:          testDSN(testAppDbName),
 				MaxOpenConns: 200,
@@ -86,27 +103,27 @@ func Test_DbManager_DSN(t *testing.T) {
 // ==================== DbManager: Sharded with reuse ====================
 
 func Test_DbManager_ShardedWithReuse(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
-		Databases: map[string]dbhelper.DatabaseEntry{
+	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
 			"default": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbSharding: &dbhelper.DbShardConfig{
+				DbSharding: &dbspi.DbShardConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
-				TableSharding: &dbhelper.TableShardConfig{
+				TableSharding: &dbspi.TableShardConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
 				MaxConcurrency: 5,
-				EntityRules: []dbhelper.EntityRule{
+				EntityRules: []dbspi.EntityRule{
 					{
 						Tables: []string{"order_detail_tab"},
-						TableSharding: &dbhelper.TableShardConfig{
+						TableSharding: &dbspi.TableShardConfig{
 							NameExpr:    "order_detail_tab_${index}",
 							ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 						},
@@ -136,19 +153,19 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 // ==================== DbManager: Named db sharding ====================
 
 func Test_DbManager_NamedDbSharding(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
-		Databases: map[string]dbhelper.DatabaseEntry{
+	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
 			"default": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbSharding: &dbhelper.DbShardConfig{
+				DbSharding: &dbspi.DbShardConfig{
 					NameExpr:    "order_${region}_db",
 					ExpandExprs: []string{"${region} := enum(SG, TH)", "${region} = @{region}"},
 				},
-				TableSharding: &dbhelper.TableShardConfig{
+				TableSharding: &dbspi.TableShardConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
@@ -169,19 +186,19 @@ func Test_DbManager_NamedDbSharding(t *testing.T) {
 // ==================== DbManager: Global default ====================
 
 func Test_DbManager_GlobalDefault(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbhelper.DatabaseConfig{
-		Databases: map[string]dbhelper.DatabaseEntry{
+	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
 			"default": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbSharding: &dbhelper.DbShardConfig{
+				DbSharding: &dbspi.DbShardConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
-				TableSharding: &dbhelper.TableShardConfig{
+				TableSharding: &dbspi.TableShardConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
