@@ -2,6 +2,7 @@ package dbsp
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"time"
 
@@ -719,16 +720,23 @@ type GormDb struct {
 	db *gorm.DB
 }
 
-// NewGormDb creates a new GormDb
-func NewGormDb(dbConfig dbspi.DbConfig) dbspi.Db {
+const (
+	defaultMaxOpenConns           = 100
+	defaultMaxIdleConns           = 10
+	defaultConnMaxLifetimeSeconds = 3600
+)
+
+// NewGormDb creates a new GormDb.
+func NewGormDb(dbConfig dbspi.DbServerConfig) dbspi.Db {
+	dbConfig = normalizeDbServerConfig(dbConfig)
 	gormCfg := &gorm.Config{}
 
-	db, err := gorm.Open(mysql.Open(dbConfig.GetDSN()), gormCfg)
+	db, err := gorm.Open(mysql.Open(dbServerDSN(dbConfig)), gormCfg)
 	if err != nil {
 		panic(err)
 	}
 
-	if dbConfig.DebugMode() {
+	if dbConfig.Debug {
 		db = db.Debug()
 	}
 
@@ -736,19 +744,39 @@ func NewGormDb(dbConfig dbspi.DbConfig) dbspi.Db {
 	if err != nil {
 		panic(err)
 	}
-	if dbConfig.MaxOpenConns() > 0 {
-		sqlDB.SetMaxOpenConns(dbConfig.MaxOpenConns())
+	if dbConfig.MaxOpenConns > 0 {
+		sqlDB.SetMaxOpenConns(dbConfig.MaxOpenConns)
 	}
-	if dbConfig.MaxIdleConns() > 0 {
-		sqlDB.SetMaxIdleConns(dbConfig.MaxIdleConns())
+	if dbConfig.MaxIdleConns > 0 {
+		sqlDB.SetMaxIdleConns(dbConfig.MaxIdleConns)
 	}
-	if dbConfig.ConnMaxLifetimeSeconds() > 0 {
-		sqlDB.SetConnMaxLifetime(time.Duration(dbConfig.ConnMaxLifetimeSeconds()) * time.Second)
+	if dbConfig.ConnMaxLifetimeSeconds > 0 {
+		sqlDB.SetConnMaxLifetime(time.Duration(dbConfig.ConnMaxLifetimeSeconds) * time.Second)
 	}
 
 	return &GormDb{
 		db: db,
 	}
+}
+
+func normalizeDbServerConfig(cfg dbspi.DbServerConfig) dbspi.DbServerConfig {
+	if cfg.MaxOpenConns == 0 {
+		cfg.MaxOpenConns = defaultMaxOpenConns
+	}
+	if cfg.MaxIdleConns == 0 {
+		cfg.MaxIdleConns = defaultMaxIdleConns
+	}
+	if cfg.ConnMaxLifetimeSeconds == 0 {
+		cfg.ConnMaxLifetimeSeconds = defaultConnMaxLifetimeSeconds
+	}
+	return cfg
+}
+
+func dbServerDSN(cfg dbspi.DbServerConfig) string {
+	if cfg.DSN != "" {
+		return cfg.DSN
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local", cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.DbName)
 }
 
 // WithModel implements dbspi.Db

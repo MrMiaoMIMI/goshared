@@ -141,8 +141,16 @@ type DbTargetEntry struct {
 func GenDbTargets(host string, port uint, user, password string, entries ...DbTargetEntry) []dbspi.DbTarget {
 	targets := make([]dbspi.DbTarget, len(entries))
 	for i, entry := range entries {
-		dbConfig := NewDbConfig(host, port, user, password, entry.DbName)
-		targets[i] = dbspi.DbTarget{Key: entry.Key, Db: NewGormDb(dbConfig)}
+		targets[i] = dbspi.DbTarget{
+			Key: entry.Key,
+			Db: NewGormDb(dbspi.DbServerConfig{
+				Host:     host,
+				Port:     port,
+				User:     user,
+				Password: password,
+				DbName:   entry.DbName,
+			}),
+		}
 	}
 	return targets
 }
@@ -171,10 +179,10 @@ func GenDbTargetsByIndex(host string, port uint, user, password string, prefix s
 // ShardingConfig provides a declarative configuration for sharded executors.
 type ShardingConfig struct {
 	// Server configures a single database server.
-	Server *dbspi.ServerConfig `yaml:"server" json:"server"`
+	Server *dbspi.DbServerConfig `yaml:"server" json:"server"`
 
 	// Servers configures multiple database servers.
-	Servers []dbspi.NamedServerConfig `yaml:"servers" json:"servers"`
+	Servers []dbspi.NamedDbServerConfig `yaml:"servers" json:"servers"`
 
 	// Db configures database-level sharding via expressions.
 	Db *dbspi.DbShardConfig `yaml:"db" json:"db"`
@@ -219,29 +227,11 @@ func NewShardedExecutorFromConfig[T dbspi.Entity](entity T, cfg ShardingConfig) 
 	return NewShardedExecutorWithOptions(entity, opts...)
 }
 
-func serverConfigOpts(server dbspi.ServerConfig) []DbConfigOption {
-	var opts []DbConfigOption
-	if server.MaxOpenConns > 0 {
-		opts = append(opts, WithMaxOpenConns(server.MaxOpenConns))
+func newDbFromServer(server dbspi.DbServerConfig, dbName string) dbspi.Db {
+	if server.DSN == "" && dbName != "" {
+		server.DbName = dbName
 	}
-	if server.MaxIdleConns > 0 {
-		opts = append(opts, WithMaxIdleConns(server.MaxIdleConns))
-	}
-	if server.ConnMaxLifetimeSeconds > 0 {
-		opts = append(opts, WithConnMaxLifetimeSeconds(server.ConnMaxLifetimeSeconds))
-	}
-	if server.Debug {
-		opts = append(opts, WithDebugMode(server.Debug))
-	}
-	return opts
-}
-
-func newDbFromServer(server dbspi.ServerConfig, dbName string) dbspi.Db {
-	opts := serverConfigOpts(server)
-	if server.DSN != "" {
-		return NewGormDb(NewDbConfigFromDSN(server.DSN, opts...))
-	}
-	return NewGormDb(NewDbConfig(server.Host, server.Port, server.User, server.Password, dbName, opts...))
+	return NewGormDb(server)
 }
 
 func buildDbTargets(cfg ShardingConfig) ([]dbspi.DbTarget, error) {
@@ -250,7 +240,7 @@ func buildDbTargets(cfg ShardingConfig) ([]dbspi.DbTarget, error) {
 		for i, s := range cfg.Servers {
 			targets[i] = dbspi.DbTarget{
 				Key: s.Key,
-				Db:  newDbFromServer(s.ServerConfig, s.DbName),
+				Db:  newDbFromServer(s.DbServerConfig, s.DbName),
 			}
 		}
 		return targets, nil
@@ -475,7 +465,7 @@ func resolveDbEntry(entry dbspi.DatabaseEntry) *resolvedDbEntry {
 		maxConcurrency:  entry.MaxConcurrency,
 	}
 
-	serverCfg := toServerConfig(entry)
+	serverCfg := toDbServerConfig(entry)
 
 	if entry.DbSharding != nil || len(entry.Servers) > 0 {
 		if entry.DbSharding != nil && len(entry.Servers) == 0 && entry.DSN != "" {
@@ -541,8 +531,8 @@ func resolveDbEntry(entry dbspi.DatabaseEntry) *resolvedDbEntry {
 	return resolved
 }
 
-func toServerConfig(entry dbspi.DatabaseEntry) dbspi.ServerConfig {
-	return dbspi.ServerConfig{
+func toDbServerConfig(entry dbspi.DatabaseEntry) dbspi.DbServerConfig {
+	return dbspi.DbServerConfig{
 		DSN:                    entry.DSN,
 		Host:                   entry.Host,
 		Port:                   entry.Port,

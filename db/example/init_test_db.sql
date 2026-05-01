@@ -72,7 +72,7 @@ SET @order_detail_cols = '`id` BIGINT NOT NULL AUTO_INCREMENT, `order_id` BIGINT
 
 -- ############################################################
 -- 1. Database: my_test
---    Used by: testNewDb() in all test files, plus
+--    Used by: testDbManager() in all test files, plus
 --             Config/Builder single-server tests (table-only sharding)
 -- ############################################################
 
@@ -218,7 +218,7 @@ DROP PROCEDURE IF EXISTS create_sharded_tables;
 -- ============================================================
 -- Summary of created resources
 -- ============================================================
--- Databases (7):
+-- Databases (6):
 --   my_test, my_app_db,
 --   order_db_0, order_db_1,
 --   order_SG_db, order_TH_db

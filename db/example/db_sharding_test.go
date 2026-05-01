@@ -42,11 +42,11 @@ func (*Order) IdFiledName() string {
 
 // OrderFields provides type-safe column references for Order.
 var OrderFields = struct {
-	ShopID dbspi.Column
-	Region dbspi.Column
+	ShopID dbspi.Field[int64]
+	Region dbspi.Field[string]
 }{
-	ShopID: dbhelper.NewColumn("shop_id"),
-	Region: dbhelper.NewColumn("region"),
+	ShopID: dbhelper.NewField[int64]("shop_id"),
+	Region: dbhelper.NewField[string]("region"),
 }
 
 // ==================== Example 1: Table-only sharding via Shard() ====================
@@ -148,9 +148,7 @@ func Test_Sharding_RegionDb(t *testing.T) {
 // ==================== Example 7: Non-sharded executor ====================
 
 func Test_Sharding_NonShardedExecutor(t *testing.T) {
-	db := testNewDb()
-
-	executor := dbhelper.NewExecutor(db, &User{})
+	executor := dbhelper.For(&User{}, testDbManager(testDbName))
 
 	ctx := context.Background()
 

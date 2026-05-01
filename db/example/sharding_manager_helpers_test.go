@@ -36,10 +36,10 @@ func singleTestDatabaseEntry() dbspi.DatabaseEntry {
 	}
 }
 
-func testNamedServer(key string) dbspi.NamedServerConfig {
-	return dbspi.NamedServerConfig{
+func testNamedServer(key string) dbspi.NamedDbServerConfig {
+	return dbspi.NamedDbServerConfig{
 		Key: key,
-		ServerConfig: dbspi.ServerConfig{
+		DbServerConfig: dbspi.DbServerConfig{
 			Host:     testDbHost,
 			Port:     testDbPort,
 			User:     testDbUser,
@@ -114,7 +114,7 @@ func newOrderIDTableExecutor(count int) dbspi.Executor[*Order] {
 
 func newOrderDbTableExecutor() dbspi.Executor[*Order] {
 	entry := orderShopTableEntry(10)
-	entry.Servers = []dbspi.NamedServerConfig{
+	entry.Servers = []dbspi.NamedDbServerConfig{
 		testNamedServer("0"),
 		testNamedServer("1"),
 	}
@@ -129,7 +129,7 @@ func newOrderDbTableExecutor() dbspi.Executor[*Order] {
 
 func newOrderNamedDbTableExecutor() dbspi.Executor[*Order] {
 	entry := orderShopTableEntry(10)
-	entry.Servers = []dbspi.NamedServerConfig{
+	entry.Servers = []dbspi.NamedDbServerConfig{
 		testNamedServer("order_SG_db"),
 		testNamedServer("order_TH_db"),
 	}
@@ -144,7 +144,7 @@ func newOrderNamedDbTableExecutor() dbspi.Executor[*Order] {
 
 func newOrderRegionDbExecutor() dbspi.Executor[*Order] {
 	entry := singleTestDatabaseEntry()
-	entry.Servers = []dbspi.NamedServerConfig{
+	entry.Servers = []dbspi.NamedDbServerConfig{
 		testNamedServer("order_SG_db"),
 		testNamedServer("order_TH_db"),
 	}
@@ -159,7 +159,7 @@ func newOrderRegionDbExecutor() dbspi.Executor[*Order] {
 
 func newRegionalOrderCompositeExecutor() dbspi.Executor[*RegionalOrder] {
 	entry := singleTestDatabaseEntry()
-	entry.Servers = []dbspi.NamedServerConfig{
+	entry.Servers = []dbspi.NamedDbServerConfig{
 		testNamedServer("SG"),
 		testNamedServer("TH"),
 	}
@@ -180,7 +180,7 @@ func newRegionalOrderCompositeExecutor() dbspi.Executor[*RegionalOrder] {
 
 func newOrderRegionRequiredExecutor() dbspi.Executor[*Order] {
 	entry := singleTestDatabaseEntry()
-	entry.Servers = []dbspi.NamedServerConfig{
+	entry.Servers = []dbspi.NamedDbServerConfig{
 		testNamedServer("SG"),
 		testNamedServer("TH"),
 	}

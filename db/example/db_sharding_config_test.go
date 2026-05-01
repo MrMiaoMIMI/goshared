@@ -51,7 +51,7 @@ func Test_Config_NamedDbs(t *testing.T) {
 
 func Test_Config_MultiServer(t *testing.T) {
 	entry := orderShopTableEntry(10)
-	entry.Servers = []dbspi.NamedServerConfig{
+	entry.Servers = []dbspi.NamedDbServerConfig{
 		testNamedServer("0"),
 		testNamedServer("1"),
 	}

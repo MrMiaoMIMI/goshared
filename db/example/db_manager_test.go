@@ -13,7 +13,7 @@ import (
 //
 // One config → one DbManager → all executors.
 // Entity declares its database group via DbKey().
-// No need to manually create DbConfig, Db, DbTarget, or sharding rules.
+// No need to manually create Db, DbTarget, or sharding rules.
 // ================================================================
 
 // ==================== Entity Definitions ====================

@@ -35,7 +35,7 @@ type DatabaseEntry struct {
 	EntityRules []EntityRule `yaml:"entity_rules" json:"entity_rules"`
 
 	// Multi-server configuration.
-	Servers []NamedServerConfig `yaml:"servers" json:"servers"`
+	Servers []NamedDbServerConfig `yaml:"servers" json:"servers"`
 
 	// Max concurrent goroutines for scatter-gather.
 	MaxConcurrency int `yaml:"max_concurrency" json:"max_concurrency"`
@@ -53,8 +53,8 @@ type EntityRule struct {
 	MaxConcurrency *int `yaml:"max_concurrency" json:"max_concurrency"`
 }
 
-// ServerConfig configures a database server connection.
-type ServerConfig struct {
+// DbServerConfig configures a database server connection.
+type DbServerConfig struct {
 	DSN      string `yaml:"dsn" json:"dsn"`
 	Host     string `yaml:"host" json:"host"`
 	Port     uint   `yaml:"port" json:"port"`
@@ -68,10 +68,10 @@ type ServerConfig struct {
 	ConnMaxLifetimeSeconds int `yaml:"conn_max_lifetime_seconds" json:"conn_max_lifetime_seconds"`
 }
 
-// NamedServerConfig extends ServerConfig with a routing key for multi-server setups.
-type NamedServerConfig struct {
-	ServerConfig `yaml:",inline" json:",inline"`
-	Key          string `yaml:"key" json:"key"`
+// NamedDbServerConfig extends DbServerConfig with a routing key for multi-server setups.
+type NamedDbServerConfig struct {
+	DbServerConfig `yaml:",inline" json:",inline"`
+	Key            string `yaml:"key" json:"key"`
 }
 
 // DbShardConfig configures database-level sharding via expressions.
@@ -96,19 +96,6 @@ type TableShardConfig struct {
 // Create one with dbhelper.NewDbManager, then pass it to dbhelper.For or dbhelper.SetDefault.
 type DbManager interface {
 	DBManager()
-}
-
-type DbConfig interface {
-	Host() string
-	Port() uint
-	User() string
-	Password() string
-	DbName() string
-	GetDSN() string
-	MaxOpenConns() int
-	MaxIdleConns() int
-	ConnMaxLifetimeSeconds() int
-	DebugMode() bool
 }
 
 type PaginationConfig interface {

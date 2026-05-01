@@ -61,9 +61,19 @@ func NewUserFieldManager() *UserFieldManager {
 	}
 }
 
-func testNewDb() dbspi.Db {
-	dbConfig := dbhelper.NewDbConfig(testDbHost, testDbPort, testDbUser, testDbPassword, testDbName, dbhelper.WithDebugMode(testDebugMode))
-	return dbhelper.NewDb(dbConfig)
+func testDbManager(dbName string) dbspi.DbManager {
+	return dbhelper.NewDbManager(dbspi.DatabaseConfig{
+		Databases: map[string]dbspi.DatabaseEntry{
+			"default": {
+				Host:     testDbHost,
+				Port:     testDbPort,
+				User:     testDbUser,
+				Password: testDbPassword,
+				DbName:   dbName,
+				Debug:    testDebugMode,
+			},
+		},
+	})
 }
 
 func testDSN(dbName string) string {
@@ -75,14 +85,11 @@ func testDSN(dbName string) string {
 func Test_ExampleUsage(t *testing.T) {
 	ctx := context.Background()
 
-	db := testNewDb()
-
 	fm := NewUserFieldManager()
-	executor := dbhelper.NewExecutor(db, &User{})
-	// executor := dbhelper.NewExecutorWithTableName(db, &User{ID: 10}, "dbspi_test_user_tab_00000001")
+	executor := dbhelper.For(&User{}, testDbManager(testDbName))
 
 	// Example 1: Find all users
-	// query1 := dbhelper.NewQuery()
+	// query1 := dbhelper.Q()
 	users, err := executor.Find(ctx, nil, nil)
 	t.Logf("Example 1: Find all users: users: %v, err: %v", users, err)
 
@@ -282,8 +289,7 @@ func ptrString(s string) *string {
 // ExampleUpdaterWithMap demonstrates using updater with map
 func Test_ExampleUpdaterWithMap(t *testing.T) {
 	ctx := context.Background()
-	db := testNewDb()
-	executor := dbhelper.NewExecutor(db, &User{})
+	executor := dbhelper.For(&User{}, testDbManager(testDbName))
 	fm := NewUserFieldManager()
 
 	// Create updater with map

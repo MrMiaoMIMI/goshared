@@ -9,9 +9,8 @@ import (
 
 func Test_EnhancedExecutor_SoftDelete(t *testing.T) {
 	ctx := context.Background()
-	db := testNewDb()
 	fm := NewUserFieldManager()
-	executor := dbhelper.NewEnhancedExecutor(db, &User{})
+	executor := dbhelper.ForEnhance(&User{}, testDbManager(testDbName))
 
 	// Example 1: SoftDeleteById
 	err := executor.SoftDeleteById(ctx, 13)
@@ -26,9 +25,8 @@ func Test_EnhancedExecutor_SoftDelete(t *testing.T) {
 
 func Test_EnhancedExecutor_RecoverFromDeleted(t *testing.T) {
 	ctx := context.Background()
-	db := testNewDb()
 	fm := NewUserFieldManager()
-	executor := dbhelper.NewEnhancedExecutor(db, &User{})
+	executor := dbhelper.ForEnhance(&User{}, testDbManager(testDbName))
 
 	// Example 3: RecoverFromDeletedById
 	err := executor.RecoverFromDeletedById(ctx, 13)
@@ -43,9 +41,8 @@ func Test_EnhancedExecutor_RecoverFromDeleted(t *testing.T) {
 
 func Test_EnhancedExecutor_FindWithoutDeleted(t *testing.T) {
 	ctx := context.Background()
-	db := testNewDb()
 	fm := NewUserFieldManager()
-	executor := dbhelper.NewEnhancedExecutor(db, &User{})
+	executor := dbhelper.ForEnhance(&User{}, testDbManager(testDbName))
 
 	// Example 5: FindWithoutDeleted - all non-deleted records
 	users, err := executor.FindWithoutDeleted(ctx, nil, nil)
@@ -82,9 +79,8 @@ func Test_EnhancedExecutor_FindWithoutDeleted(t *testing.T) {
 
 func Test_EnhancedExecutor_CountWithoutDeleted(t *testing.T) {
 	ctx := context.Background()
-	db := testNewDb()
 	fm := NewUserFieldManager()
-	executor := dbhelper.NewEnhancedExecutor(db, &User{})
+	executor := dbhelper.ForEnhance(&User{}, testDbManager(testDbName))
 
 	// Example 9: CountWithoutDeleted - all non-deleted records
 	count, err := executor.CountWithoutDeleted(ctx, nil)
@@ -99,9 +95,8 @@ func Test_EnhancedExecutor_CountWithoutDeleted(t *testing.T) {
 
 func Test_EnhancedExecutor_ExistsWithoutDeleted(t *testing.T) {
 	ctx := context.Background()
-	db := testNewDb()
 	fm := NewUserFieldManager()
-	executor := dbhelper.NewEnhancedExecutor(db, &User{})
+	executor := dbhelper.ForEnhance(&User{}, testDbManager(testDbName))
 
 	// Example 11: ExistsByIdWithoutDeleted
 	exists, user, err := executor.ExistsByIdWithoutDeleted(ctx, 14)
@@ -116,8 +111,7 @@ func Test_EnhancedExecutor_ExistsWithoutDeleted(t *testing.T) {
 
 func Test_EnhancedExecutor_SoftDeleteAndRecover(t *testing.T) {
 	ctx := context.Background()
-	db := testNewDb()
-	executor := dbhelper.NewEnhancedExecutor(db, &User{})
+	executor := dbhelper.ForEnhance(&User{}, testDbManager(testDbName))
 
 	targetID := 34
 
