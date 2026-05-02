@@ -18,7 +18,7 @@ import (
 
 // ==================== Entity Definitions ====================
 
-// User is a non-sharded entity. No DbKey() → uses "default" database.
+// User is a non-sharded entity. No DbKey() uses dbspi.DefaultDbKey.
 // (User struct is defined in db_test.go)
 
 // OrderItem shares the same database group as Order.
@@ -31,7 +31,7 @@ type OrderItem struct {
 
 func (*OrderItem) TableName() string   { return "order_item_tab" }
 func (*OrderItem) DbKey() string       { return "order_dbs" }
-func (*OrderItem) IdFiledName() string { return "id" }
+func (*OrderItem) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 // OrderDetail shares the same database group but has different table sharding.
 type OrderDetail struct {
@@ -43,42 +43,48 @@ type OrderDetail struct {
 
 func (*OrderDetail) TableName() string   { return "order_detail_tab" }
 func (*OrderDetail) DbKey() string       { return "order_dbs" }
-func (*OrderDetail) IdFiledName() string { return "id" }
+func (*OrderDetail) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 // ==================== DbManager: Non-sharded ====================
 
 func Test_DbManager_Simple(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default": {
+			dbspi.DefaultDbKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
 		},
 	})
 
-	userExec := dbhelper.For(&User{}, mgr)
+	userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))
 
 	ctx := context.Background()
 	users, err := userExec.Find(ctx, nil, nil)
-	t.Logf("DbManager simple: users=%v, err=%v", users, err)
+	requireNoError(t, err)
+	if len(users) == 0 {
+		t.Fatal("expected users from default database")
+	}
 }
 
 func Test_DbManager_ForEnhance_Simple(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default": {
+			dbspi.DefaultDbKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
 		},
 	})
 
-	userExec := dbhelper.ForEnhance(&User{}, mgr)
+	userExec := dbhelper.ForEnhance(&User{}, dbhelper.WithDbManager(mgr))
 
 	ctx := context.Background()
 	count, err := userExec.CountWithoutDeleted(ctx, nil)
-	t.Logf("DbManager ForEnhance simple: count=%d, err=%v", count, err)
+	requireNoError(t, err)
+	if count == 0 {
+		t.Fatal("expected non-deleted user count")
+	}
 }
 
 // ==================== DbManager: DSN mode ====================
@@ -86,18 +92,21 @@ func Test_DbManager_ForEnhance_Simple(t *testing.T) {
 func Test_DbManager_DSN(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default": {
+			dbspi.DefaultDbKey: {
 				DSN:          testDSN(testAppDbName),
 				MaxOpenConns: 200,
 			},
 		},
 	})
 
-	userExec := dbhelper.For(&User{}, mgr)
+	userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))
 
 	ctx := context.Background()
 	users, err := userExec.Find(ctx, nil, nil)
-	t.Logf("DbManager DSN: users=%v, err=%v", users, err)
+	requireNoError(t, err)
+	if len(users) == 0 {
+		t.Fatal("expected users from DSN database")
+	}
 }
 
 // ==================== DbManager: Sharded with reuse ====================
@@ -105,7 +114,7 @@ func Test_DbManager_DSN(t *testing.T) {
 func Test_DbManager_ShardedWithReuse(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default": {
+			dbspi.DefaultDbKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
@@ -133,21 +142,21 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, mgr)
-	itemExec := dbhelper.For(&OrderItem{}, mgr)
-	detailExec := dbhelper.For(&OrderDetail{}, mgr)
+	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
+	itemExec := dbhelper.For(&OrderItem{}, dbhelper.WithDbManager(mgr))
+	detailExec := dbhelper.For(&OrderDetail{}, dbhelper.WithDbManager(mgr))
 
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
-	orders, err := orderExec.Find(ctx, nil, nil)
-	t.Logf("Order (4×10): orders=%v, err=%v", orders, err)
+	_, err := orderExec.Find(ctx, nil, nil)
+	requireNoError(t, err)
 
-	items, err := itemExec.Find(ctx, nil, nil)
-	t.Logf("OrderItem (4×10, shared): items=%v, err=%v", items, err)
+	_, err = itemExec.Find(ctx, nil, nil)
+	requireNoError(t, err)
 
-	details, err := detailExec.Find(ctx, nil, nil)
-	t.Logf("OrderDetail (4×20, overridden): details=%v, err=%v", details, err)
+	_, err = detailExec.Find(ctx, nil, nil)
+	requireNoError(t, err)
 }
 
 // ==================== DbManager: Named db sharding ====================
@@ -155,7 +164,7 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 func Test_DbManager_NamedDbSharding(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default": {
+			dbspi.DefaultDbKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
@@ -173,14 +182,14 @@ func Test_DbManager_NamedDbSharding(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, mgr)
+	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
 
 	sk := dbspi.NewShardingKey().
 		Set(OrderFields.Region, "SG").
 		Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
-	orders, err := orderExec.Find(ctx, nil, nil)
-	t.Logf("Named db sharding (SG): orders=%v, err=%v", orders, err)
+	_, err := orderExec.Find(ctx, nil, nil)
+	requireNoError(t, err)
 }
 
 // ==================== DbManager: Global default ====================
@@ -188,7 +197,7 @@ func Test_DbManager_NamedDbSharding(t *testing.T) {
 func Test_DbManager_GlobalDefault(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default": {
+			dbspi.DefaultDbKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
@@ -213,10 +222,13 @@ func Test_DbManager_GlobalDefault(t *testing.T) {
 
 	ctx := context.Background()
 	users, err := userExec.Find(ctx, nil, nil)
-	t.Logf("Global default - User: users=%v, err=%v", users, err)
+	requireNoError(t, err)
+	if len(users) == 0 {
+		t.Fatal("expected users from global default manager")
+	}
 
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx = dbspi.WithShardingKey(ctx, sk)
-	orders, err := orderExec.Find(ctx, nil, nil)
-	t.Logf("Global default - Order: orders=%v, err=%v", orders, err)
+	_, err = orderExec.Find(ctx, nil, nil)
+	requireNoError(t, err)
 }

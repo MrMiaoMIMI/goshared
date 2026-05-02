@@ -36,8 +36,8 @@ func (*Order) DbKey() string {
 	return "order_dbs"
 }
 
-func (*Order) IdFiledName() string {
-	return "id"
+func (*Order) IdFieldName() string {
+	return dbspi.DefaultIdFieldName
 }
 
 // OrderFields provides type-safe column references for Order.
@@ -63,13 +63,15 @@ func Test_Sharding_TableOnly_WithShard(t *testing.T) {
 	}
 
 	order, err := shardedExec.GetById(ctx, 1001)
-	t.Logf("Example 1a: GetById via Shard(): order=%v, err=%v", order, err)
+	requireNoError(t, err)
+	t.Logf("Example 1a: GetById via Shard(): order=%v", order)
 
 	orders, err := shardedExec.Find(ctx, nil, nil)
-	t.Logf("Example 1b: Find via Shard(): orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("Example 1b: Find via Shard(): orders=%v", orders)
 
 	err = shardedExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
-	t.Logf("Example 1c: Create via Shard(): err=%v", err)
+	requireNoError(t, err)
 }
 
 // ==================== Example 2: Table-only sharding via ctx ====================
@@ -81,13 +83,15 @@ func Test_Sharding_TableOnly_WithCtx(t *testing.T) {
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	order, err := executor.GetById(ctx, 1001)
-	t.Logf("Example 2a: GetById via ctx: order=%v, err=%v", order, err)
+	requireNoError(t, err)
+	t.Logf("Example 2a: GetById via ctx: order=%v", order)
 
 	orders, err := executor.Find(ctx, nil, nil)
-	t.Logf("Example 2b: Find via ctx: orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("Example 2b: Find via ctx: orders=%v", orders)
 
 	err = executor.Create(ctx, &Order{ShopID: 12345, Amount: 200})
-	t.Logf("Example 2c: Create via ctx: err=%v", err)
+	requireNoError(t, err)
 }
 
 // ==================== Example 3: Missing sharding key ====================
@@ -97,7 +101,7 @@ func Test_Sharding_MissingKey(t *testing.T) {
 
 	ctx := context.Background()
 	_, err := executor.GetById(ctx, 1001)
-	t.Logf("Example 3: GetById without sharding key: err=%v", err)
+	requireErrorContains(t, err, "missing")
 }
 
 // ==================== Example 4: Scatter-gather ====================
@@ -108,13 +112,16 @@ func Test_Sharding_FindAll(t *testing.T) {
 	ctx := context.Background()
 
 	allOrders, err := executor.FindAll(ctx, nil, 0)
-	t.Logf("Example 4a: FindAll (no batch): count=%d, err=%v", len(allOrders), err)
+	requireNoError(t, err)
+	t.Logf("Example 4a: FindAll (no batch): count=%d", len(allOrders))
 
 	allOrders, err = executor.FindAll(ctx, nil, 100)
-	t.Logf("Example 4b: FindAll (batch=100): count=%d, err=%v", len(allOrders), err)
+	requireNoError(t, err)
+	t.Logf("Example 4b: FindAll (batch=100): count=%d", len(allOrders))
 
 	total, err := executor.CountAll(ctx, nil)
-	t.Logf("Example 4c: CountAll: total=%d, err=%v", total, err)
+	requireNoError(t, err)
+	t.Logf("Example 4c: CountAll: total=%d", total)
 }
 
 // ==================== Example 5: Database + Table sharding ====================
@@ -126,7 +133,8 @@ func Test_Sharding_DbAndTable(t *testing.T) {
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	order, err := executor.GetById(ctx, 1)
-	t.Logf("Example 5: Db+Table sharding: order=%v, err=%v", order, err)
+	requireNoError(t, err)
+	t.Logf("Example 5: Db+Table sharding: order=%v", order)
 }
 
 // ==================== Example 6: Region-based DB sharding ====================
@@ -137,29 +145,33 @@ func Test_Sharding_RegionDb(t *testing.T) {
 	sk := dbspi.NewShardingKey().Set(OrderFields.Region, "SG")
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 	orders, err := executor.Find(ctx, nil, nil)
-	t.Logf("Example 6a: Region DB (SG): orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("Example 6a: Region DB (SG): orders=%v", orders)
 
 	sk = dbspi.NewShardingKey().Set(OrderFields.Region, "TH")
 	ctx = dbspi.WithShardingKey(context.Background(), sk)
 	orders, err = executor.Find(ctx, nil, nil)
-	t.Logf("Example 6b: Region DB (TH): orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("Example 6b: Region DB (TH): orders=%v", orders)
 }
 
 // ==================== Example 7: Non-sharded executor ====================
 
 func Test_Sharding_NonShardedExecutor(t *testing.T) {
-	executor := dbhelper.For(&User{}, testDbManager(testDbName))
+	executor := dbhelper.For(&User{}, dbhelper.WithDbManager(testDbManager(testDbName)))
 
 	ctx := context.Background()
 
 	sameExec, err := executor.Shard(nil)
-	t.Logf("Example 7a: Shard() on non-sharded: err=%v (should be nil)", err)
+	requireNoError(t, err)
 
 	users, err := sameExec.Find(ctx, nil, nil)
-	t.Logf("Example 7b: Find via Shard() on non-sharded: users=%v, err=%v", users, err)
+	requireNoError(t, err)
+	t.Logf("Example 7b: Find via Shard() on non-sharded: users=%v", users)
 
 	allUsers, err := executor.FindAll(ctx, nil, 0)
-	t.Logf("Example 7c: FindAll on non-sharded: users=%v, err=%v", allUsers, err)
+	requireNoError(t, err)
+	t.Logf("Example 7c: FindAll on non-sharded: users=%v", allUsers)
 }
 
 // ==================== Example 8: Composite sharding key (db + table use different fields) ====================
@@ -173,5 +185,6 @@ func Test_Sharding_CompositeKey(t *testing.T) {
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	orders, err := executor.Find(ctx, nil, nil)
-	t.Logf("Example 8: Composite key (region=SG, shop_id=12345): orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("Example 8: Composite key (region=SG, shop_id=12345): orders=%v", orders)
 }

@@ -29,7 +29,3 @@ type EnhancedExecutor[T Entity] interface {
 	// ExistsWithoutDeleted is a method that checks if the entity exists without the soft delete flag
 	ExistsWithoutDeleted(ctx context.Context, query Query) (bool, T, error)
 }
-
-type OptionalDeletedField interface {
-	DeletedFiledName() string
-}

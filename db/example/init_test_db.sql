@@ -83,6 +83,10 @@ CREATE TABLE `dbspi_test_user_tab` (
     `email`   VARCHAR(255) NOT NULL DEFAULT '',
     `age`     INT          NOT NULL DEFAULT 0,
     `status`  VARCHAR(64)  NOT NULL DEFAULT '',
+    `creator` VARCHAR(255) NOT NULL DEFAULT '',
+    `updater` VARCHAR(255) NOT NULL DEFAULT '',
+    `ctime`   BIGINT       NOT NULL DEFAULT 0,
+    `mtime`   BIGINT       NOT NULL DEFAULT 0,
     `deleted` TINYINT(1)   NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -136,6 +140,10 @@ CREATE TABLE `dbspi_test_user_tab` (
     `email`   VARCHAR(255) NOT NULL DEFAULT '',
     `age`     INT          NOT NULL DEFAULT 0,
     `status`  VARCHAR(64)  NOT NULL DEFAULT '',
+    `creator` VARCHAR(255) NOT NULL DEFAULT '',
+    `updater` VARCHAR(255) NOT NULL DEFAULT '',
+    `ctime`   BIGINT       NOT NULL DEFAULT 0,
+    `mtime`   BIGINT       NOT NULL DEFAULT 0,
     `deleted` TINYINT(1)   NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

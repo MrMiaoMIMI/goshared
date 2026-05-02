@@ -19,7 +19,7 @@ type RegionalOrder struct {
 
 func (*RegionalOrder) TableName() string   { return "order_tab" }
 func (*RegionalOrder) DbKey() string       { return "order_dbs" }
-func (*RegionalOrder) IdFiledName() string { return "id" }
+func (*RegionalOrder) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 // ==================== Auto-extract from Entity ====================
 
@@ -28,7 +28,7 @@ func Test_AutoKey_Create_FromEntity(t *testing.T) {
 
 	ctx := context.Background()
 	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
-	t.Logf("Create auto-extract from entity: err=%v", err)
+	requireNoError(t, err)
 }
 
 func Test_AutoKey_Save_FromEntity(t *testing.T) {
@@ -36,7 +36,7 @@ func Test_AutoKey_Save_FromEntity(t *testing.T) {
 
 	ctx := context.Background()
 	err := executor.Save(ctx, &Order{ShopID: 12345, Amount: 200})
-	t.Logf("Save auto-extract from entity: err=%v", err)
+	requireNoError(t, err)
 }
 
 func Test_AutoKey_Update_FromEntity(t *testing.T) {
@@ -44,7 +44,7 @@ func Test_AutoKey_Update_FromEntity(t *testing.T) {
 
 	ctx := context.Background()
 	err := executor.Update(ctx, &Order{ID: 1, ShopID: 12345, Amount: 300})
-	t.Logf("Update auto-extract from entity: err=%v", err)
+	requireNoError(t, err)
 }
 
 func Test_AutoKey_Delete_FromEntity(t *testing.T) {
@@ -52,7 +52,7 @@ func Test_AutoKey_Delete_FromEntity(t *testing.T) {
 
 	ctx := context.Background()
 	err := executor.Delete(ctx, &Order{ID: 1, ShopID: 12345})
-	t.Logf("Delete auto-extract from entity: err=%v", err)
+	requireNoError(t, err)
 }
 
 func Test_AutoKey_BatchCreate_FromEntity(t *testing.T) {
@@ -64,7 +64,7 @@ func Test_AutoKey_BatchCreate_FromEntity(t *testing.T) {
 		{ShopID: 12345, Amount: 200},
 	}
 	err := executor.BatchCreate(ctx, entities, 100)
-	t.Logf("BatchCreate auto-extract from first entity: err=%v", err)
+	requireNoError(t, err)
 }
 
 func Test_AutoKey_BatchCreate_EmptySlice(t *testing.T) {
@@ -88,7 +88,8 @@ func Test_AutoKey_Find_FromQuery(t *testing.T) {
 	ctx := context.Background()
 	shopId := int64(12345)
 	orders, err := executor.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
-	t.Logf("Find auto-extract from query: orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("Find auto-extract from query: orders=%v", orders)
 }
 
 func Test_AutoKey_Count_FromQuery(t *testing.T) {
@@ -99,7 +100,8 @@ func Test_AutoKey_Count_FromQuery(t *testing.T) {
 	ctx := context.Background()
 	shopId := int64(12345)
 	count, err := executor.Count(ctx, dbhelper.Q(shopIdField.Eq(&shopId)))
-	t.Logf("Count auto-extract from query: count=%d, err=%v", count, err)
+	requireNoError(t, err)
+	t.Logf("Count auto-extract from query: count=%d", count)
 }
 
 func Test_AutoKey_Exists_FromQuery(t *testing.T) {
@@ -110,7 +112,8 @@ func Test_AutoKey_Exists_FromQuery(t *testing.T) {
 	ctx := context.Background()
 	shopId := int64(12345)
 	exists, order, err := executor.Exists(ctx, dbhelper.Q(shopIdField.Eq(&shopId)))
-	t.Logf("Exists auto-extract from query: exists=%v, order=%v, err=%v", exists, order, err)
+	requireNoError(t, err)
+	t.Logf("Exists auto-extract from query: exists=%v, order=%v", exists, order)
 }
 
 func Test_AutoKey_DeleteByQuery_FromQuery(t *testing.T) {
@@ -121,7 +124,7 @@ func Test_AutoKey_DeleteByQuery_FromQuery(t *testing.T) {
 	ctx := context.Background()
 	shopId := int64(12345)
 	err := executor.DeleteByQuery(ctx, dbhelper.Q(shopIdField.Eq(&shopId)))
-	t.Logf("DeleteByQuery auto-extract from query: err=%v", err)
+	requireNoError(t, err)
 }
 
 // ==================== Auto-extract from Query (nested) ====================
@@ -141,7 +144,8 @@ func Test_AutoKey_Find_FromNestedQuery(t *testing.T) {
 		dbhelper.Q(shopIdField.Eq(&shopId), statusField.Eq(&status)),
 	)
 	orders, err := executor.Find(ctx, nestedQuery, nil)
-	t.Logf("Find from nested AND query: orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("Find from nested AND query: orders=%v", orders)
 }
 
 func Test_AutoKey_Find_FromMixedQuery(t *testing.T) {
@@ -165,7 +169,8 @@ func Test_AutoKey_Find_FromMixedQuery(t *testing.T) {
 		amountField.Gt(&amount),
 	)
 	orders, err := executor.Find(ctx, query, nil)
-	t.Logf("Find from mixed query (OR + Eq + Gt): orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("Find from mixed query (OR + Eq + Gt): orders=%v", orders)
 }
 
 // ==================== Auto-extract from ID ====================
@@ -176,7 +181,8 @@ func Test_AutoKey_GetById_FromId(t *testing.T) {
 
 	ctx := context.Background()
 	order, err := executor.GetById(ctx, int64(1001))
-	t.Logf("GetById auto-extract from id: order=%v, err=%v", order, err)
+	requireNoError(t, err)
+	t.Logf("GetById auto-extract from id: order=%v", order)
 }
 
 func Test_AutoKey_DeleteById_FromId(t *testing.T) {
@@ -184,7 +190,7 @@ func Test_AutoKey_DeleteById_FromId(t *testing.T) {
 
 	ctx := context.Background()
 	err := executor.DeleteById(ctx, int64(1001))
-	t.Logf("DeleteById auto-extract from id: err=%v", err)
+	requireNoError(t, err)
 }
 
 // ==================== Ctx key + auto-extract aggregation ====================
@@ -266,7 +272,7 @@ func Test_AutoKey_CtxOnly_StillWorks(t *testing.T) {
 
 	// Raw/Exec only uses ctx key (no auto-extraction possible)
 	err := executor.Exec(ctx, "SELECT 1")
-	t.Logf("Ctx-only Raw/Exec: err=%v", err)
+	requireNoError(t, err)
 }
 
 // ==================== Composite key: auto-extract all fields from entity ====================
@@ -276,7 +282,7 @@ func Test_AutoKey_CompositeKey_FromEntity(t *testing.T) {
 
 	ctx := context.Background()
 	err := executor.Create(ctx, &RegionalOrder{ShopID: 12345, Region: "SG", Amount: 100})
-	t.Logf("Composite key auto-extract from entity (region+shop_id): err=%v", err)
+	requireNoError(t, err)
 }
 
 // ==================== Missing column: entity lacks required field ====================
@@ -374,7 +380,8 @@ func Test_AutoKey_QueryNoConflict_SameValue(t *testing.T) {
 	// AND(shop_id=12345, shop_id=12345) -- same value, no conflict
 	query := dbhelper.Q(shopIdField.Eq(&shopId), shopIdField.Eq(&shopId))
 	orders, err := executor.Find(ctx, query, nil)
-	t.Logf("Same value no conflict: orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("Same value no conflict: orders=%v", orders)
 }
 
 // ==================== Cross-source conflict (FirstOrCreate) ====================
@@ -392,7 +399,7 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_NoConflict(t *testing.T) {
 		&Order{ShopID: 12345, Amount: 100},
 		dbhelper.Q(shopIdField.Eq(&shopId)),
 	)
-	t.Logf("FirstOrCreate no conflict (same shop_id): err=%v", err)
+	requireNoError(t, err)
 }
 
 func Test_AutoKey_FirstOrCreate_EntityAndQuery_CrossShard(t *testing.T) {
@@ -430,7 +437,7 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_SameTable(t *testing.T) {
 		&Order{ShopID: 12345, Amount: 100},
 		dbhelper.Q(shopIdField.Eq(&queryShopId)),
 	)
-	t.Logf("FirstOrCreate same-table different values: err=%v", err)
+	requireNoError(t, err)
 }
 
 // ==================== OR query: now extractable with same-target validation ====================
@@ -558,7 +565,7 @@ func Test_AutoKey_NilQuery_MissingColumn(t *testing.T) {
 func Test_AutoKey_DbManager_CreateWithoutExplicitKey(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default": {
+			dbspi.DefaultDbKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword, Debug: true,
 				DbName: testAppDbName,
 			},
@@ -576,17 +583,17 @@ func Test_AutoKey_DbManager_CreateWithoutExplicitKey(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, mgr)
+	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
 
 	ctx := context.Background()
 	err := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
-	t.Logf("DbManager Create without explicit key: err=%v", err)
+	requireNoError(t, err)
 }
 
 func Test_AutoKey_DbManager_FindWithQuery(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default": {
+			dbspi.DefaultDbKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
@@ -604,13 +611,14 @@ func Test_AutoKey_DbManager_FindWithQuery(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, mgr)
+	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
 
 	ctx := context.Background()
 	shopId := int64(12345)
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	orders, err := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
-	t.Logf("DbManager Find with query auto-extract: orders=%v, err=%v", orders, err)
+	requireNoError(t, err)
+	t.Logf("DbManager Find with query auto-extract: orders=%v", orders)
 }
 
 // ==================== ${table} Variable Tests ====================
@@ -620,7 +628,7 @@ func Test_TableVar_ResolveTable(t *testing.T) {
 
 	ctx := context.Background()
 	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
-	t.Logf("${table} variable resolve: err=%v (Order.TableName()='order_tab' → 'order_tab_00000005')", err)
+	requireNoError(t, err)
 }
 
 // OrderDetailTab is a separate entity to test ${table} resolves to different table names.
@@ -632,7 +640,7 @@ type OrderDetailTab struct {
 
 func (*OrderDetailTab) TableName() string   { return "order_detail_tab" }
 func (*OrderDetailTab) DbKey() string       { return "order_dbs" }
-func (*OrderDetailTab) IdFiledName() string { return "id" }
+func (*OrderDetailTab) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 func Test_TableVar_DifferentEntitiesSameRule(t *testing.T) {
 	orderExec := newTableVarExecutor(&Order{}, 10)
@@ -641,19 +649,20 @@ func Test_TableVar_DifferentEntitiesSameRule(t *testing.T) {
 	ctx := context.Background()
 	err1 := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 	err2 := detailExec.Create(ctx, &OrderDetailTab{ShopID: 12345, Detail: "test"})
-	t.Logf("Order resolved → order_tab_XXXXXXXX: err=%v", err1)
-	t.Logf("OrderDetail resolved → order_detail_tab_XXXXXXXX: err=%v", err2)
+	requireNoError(t, err1)
+	requireNoError(t, err2)
 }
 
 func Test_TableVar_EntityRuleInheritNameExpr(t *testing.T) {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default": {
+			dbspi.DefaultDbKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
 				DbName: testAppDbName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
+				DbName: testDbName,
 				TableSharding: &dbspi.TableShardConfig{
 					NameExpr:    "${table}_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
@@ -670,15 +679,14 @@ func Test_TableVar_EntityRuleInheritNameExpr(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, mgr)
-	detailExec := dbhelper.For(&OrderDetailTab{}, mgr)
+	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
+	detailExec := dbhelper.For(&OrderDetailTab{}, dbhelper.WithDbManager(mgr))
 
 	ctx := context.Background()
 	err1 := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 	err2 := detailExec.Create(ctx, &OrderDetailTab{ShopID: 12345, Detail: "test"})
-
-	t.Logf("Order (global rule, 10 shards): err=%v", err1)
-	t.Logf("OrderDetail (inherited name_expr, 20 shards): err=%v", err2)
+	requireNoError(t, err1)
+	requireNoError(t, err2)
 }
 
 // ==================== Range Condition Detection Tests ====================
@@ -727,8 +735,7 @@ func Test_AutoKey_RangeCondition_WithEqOk(t *testing.T) {
 	minAmount := int64(100)
 	_, err := executor.Find(ctx,
 		dbhelper.Q(shopIdField.Eq(&shopId), amountField.Gt(&minAmount)), nil)
-
-	t.Logf("Eq on sharding col + Gt on non-sharding col: err=%v (should succeed)", err)
+	requireNoError(t, err)
 }
 
 func Test_AutoKey_RangeCondition_BetweenDetected(t *testing.T) {

@@ -1,8 +1,6 @@
 package dbhelper
 
 import (
-	"context"
-
 	"github.com/MrMiaoMIMI/goshared/db/dbspi"
 	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp"
 )
@@ -50,10 +48,4 @@ func NewPaginationConfig() dbspi.PaginationConfig {
 // NewOrderConfig creates an order config.
 func NewOrderConfig(column dbspi.Column, desc bool) dbspi.OrderConfig {
 	return dbsp.NewOrderConfig(column, desc)
-}
-
-// Transaction runs fn within a database transaction.
-// The transaction is committed if fn returns nil, and rolled back otherwise.
-func Transaction(ctx context.Context, db dbspi.Db, fn dbspi.TxFn) error {
-	return db.Transaction(ctx, fn)
 }

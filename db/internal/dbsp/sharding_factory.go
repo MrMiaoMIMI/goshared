@@ -17,6 +17,7 @@ type shardConfig struct {
 	dbRule         dbspi.DbShardingRule
 	tableRule      dbspi.TableShardingRule
 	maxConcurrency int
+	commonFields   dbspi.CommonFieldOptions
 }
 
 // NewShardedExecutorWithOptions creates a sharded executor with the given entity and options.
@@ -30,6 +31,7 @@ func NewShardedExecutorWithOptions[T dbspi.Entity](entity T, opts ...ShardOption
 		DbRule:         cfg.dbRule,
 		TableRule:      cfg.tableRule,
 		MaxConcurrency: cfg.maxConcurrency,
+		CommonFields:   cfg.commonFields,
 	})
 }
 
@@ -58,6 +60,12 @@ func WithTableRule(rule dbspi.TableShardingRule) ShardOption {
 func WithMaxConcurrency(n int) ShardOption {
 	return func(c *shardConfig) {
 		c.maxConcurrency = n
+	}
+}
+
+func WithCommonFields(commonFields dbspi.CommonFieldOptions) ShardOption {
+	return func(c *shardConfig) {
+		c.commonFields = commonFields
 	}
 }
 
@@ -345,12 +353,21 @@ type entityOverride struct {
 
 // DbManager manages database connections and sharding configurations.
 type DbManager struct {
-	mu      sync.RWMutex
-	entries map[string]*resolvedDbEntry
+	mu           sync.RWMutex
+	entries      map[string]*resolvedDbEntry
+	commonFields dbspi.CommonFieldOptions
 }
 
 // DBManager marks DbManager as the dbspi.DbManager implementation.
 func (*DbManager) DBManager() {}
+
+// CommonFieldOptions returns the manager-level common-field configuration.
+func (m *DbManager) CommonFieldOptions() dbspi.CommonFieldOptions {
+	if m == nil {
+		return dbspi.DefaultCommonFieldOptions()
+	}
+	return m.commonFields
+}
 
 var (
 	defaultManager   *DbManager
@@ -358,9 +375,10 @@ var (
 )
 
 // NewDbManager creates a new DbManager from the given configuration.
-func NewDbManager(cfg dbspi.DatabaseConfig) *DbManager {
+func NewDbManager(cfg dbspi.DatabaseConfig, commonFields dbspi.CommonFieldOptions) *DbManager {
 	mgr := &DbManager{
-		entries: make(map[string]*resolvedDbEntry, len(cfg.Databases)),
+		entries:      make(map[string]*resolvedDbEntry, len(cfg.Databases)),
+		commonFields: commonFields.Normalize(),
 	}
 	for name, entry := range cfg.Databases {
 		mgr.entries[name] = resolveDbEntry(entry)
@@ -393,8 +411,15 @@ func For[T dbspi.Entity](entity T, managers ...*DbManager) dbspi.Executor[T] {
 	} else {
 		mgr = DefaultDbManager()
 	}
+	return ForWithCommonFields(entity, mgr, mgr.commonFields)
+}
 
-	key := "default"
+func ForWithCommonFields[T dbspi.Entity](entity T, mgr *DbManager, commonFields dbspi.CommonFieldOptions) dbspi.Executor[T] {
+	if mgr == nil {
+		mgr = DefaultDbManager()
+	}
+	commonFields = commonFields.Normalize()
+	key := dbspi.DefaultDbKey
 	if provider, ok := any(entity).(dbspi.DbKeyProvider); ok {
 		key = provider.DbKey()
 	}
@@ -402,12 +427,12 @@ func For[T dbspi.Entity](entity T, managers ...*DbManager) dbspi.Executor[T] {
 	mgr.mu.RLock()
 	entry, ok := mgr.entries[key]
 	if !ok {
-		entry, ok = mgr.entries["default"]
+		entry, ok = mgr.entries[dbspi.DefaultDbKey]
 	}
 	mgr.mu.RUnlock()
 
 	if !ok {
-		panic(fmt.Sprintf("dbhelper: database config %q not found (and no \"default\" fallback)", key))
+		panic(fmt.Sprintf("dbhelper: database config %q not found (and no %q fallback)", key, dbspi.DefaultDbKey))
 	}
 
 	tableName := entity.TableName()
@@ -428,7 +453,7 @@ func For[T dbspi.Entity](entity T, managers ...*DbManager) dbspi.Executor[T] {
 		if db == nil && len(entry.dbs) > 0 {
 			db = entry.dbs[0].Db
 		}
-		return NewExecutor(db, entity)
+		return NewExecutorWithCommonFields(db, entity, commonFields)
 	}
 
 	var opts []ShardOption
@@ -446,12 +471,22 @@ func For[T dbspi.Entity](entity T, managers ...*DbManager) dbspi.Executor[T] {
 	if maxConcurrency > 0 {
 		opts = append(opts, WithMaxConcurrency(maxConcurrency))
 	}
+	opts = append(opts, WithCommonFields(commonFields))
 	return NewShardedExecutorWithOptions(entity, opts...)
 }
 
 // ForEnhance creates an EnhancedExecutor for the given entity using the DbManager.
 func ForEnhance[T dbspi.Entity](entity T, managers ...*DbManager) dbspi.EnhancedExecutor[T] {
 	exec := For(entity, managers...)
+	enhanced, ok := exec.(dbspi.EnhancedExecutor[T])
+	if !ok {
+		panic("dbhelper: resolved executor does not implement EnhancedExecutor")
+	}
+	return enhanced
+}
+
+func ForEnhanceWithCommonFields[T dbspi.Entity](entity T, mgr *DbManager, commonFields dbspi.CommonFieldOptions) dbspi.EnhancedExecutor[T] {
+	exec := ForWithCommonFields(entity, mgr, commonFields)
 	enhanced, ok := exec.(dbspi.EnhancedExecutor[T])
 	if !ok {
 		panic("dbhelper: resolved executor does not implement EnhancedExecutor")

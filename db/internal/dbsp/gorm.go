@@ -21,8 +21,8 @@ func (t _tableForCheck) TableName() string {
 	return "table_for_check"
 }
 
-func (t _tableForCheck) IdFiledName() string {
-	return "id"
+func (t _tableForCheck) IdFieldName() string {
+	return dbspi.DefaultIdFieldName
 }
 
 var (
@@ -544,6 +544,7 @@ func (u *GormUpdater) Params() map[string]any {
 type GormExecutor[T dbspi.Entity] struct {
 	db                  dbspi.Db
 	emptyEntityInstance T
+	commonFields        dbspi.CommonFieldOptions
 }
 
 // NewExecutor creates a new GormExecutor with the given entity instance
@@ -551,6 +552,10 @@ type GormExecutor[T dbspi.Entity] struct {
 // NewExecutor(db, &User{})
 func NewExecutor[T dbspi.Entity](db dbspi.Db, entityInstance T) *GormExecutor[T] {
 	return NewExecutorWithTableName(db, entityInstance, entityInstance.TableName())
+}
+
+func NewExecutorWithCommonFields[T dbspi.Entity](db dbspi.Db, entityInstance T, commonFields dbspi.CommonFieldOptions) *GormExecutor[T] {
+	return newExecutorWithTableName(db, entityInstance, entityInstance.TableName(), commonFields)
 }
 
 // Shard is a no-op for non-sharded executor, returns self.
@@ -572,6 +577,14 @@ func (e *GormExecutor[T]) CountAll(ctx context.Context, query dbspi.Query) (uint
 // Example:
 // NewExecutorWithTableName(db, &User{}, "user_tab_00000001")
 func NewExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string) *GormExecutor[T] {
+	return newExecutorWithTableName(db, entityInstance, tableName, dbspi.DisabledCommonFieldOptions())
+}
+
+func NewExecutorWithTableNameAndCommonFields[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string, commonFields dbspi.CommonFieldOptions) *GormExecutor[T] {
+	return newExecutorWithTableName(db, entityInstance, tableName, commonFields)
+}
+
+func newExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string, commonFields dbspi.CommonFieldOptions) *GormExecutor[T] {
 	if any(entityInstance) == nil {
 		panic("entityInstance is nil")
 	}
@@ -585,6 +598,7 @@ func NewExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tab
 	return &GormExecutor[T]{
 		db:                  db,
 		emptyEntityInstance: entity.(T),
+		commonFields:        commonFields,
 	}
 }
 
@@ -649,16 +663,19 @@ func (e *GormExecutor[T]) Count(ctx context.Context, query dbspi.Query) (uint64,
 
 // Create implements dbspi.Executor
 func (e *GormExecutor[T]) Create(ctx context.Context, value T) error {
+	applyCreateCommonFields(ctx, e.commonFields, value)
 	return e.db.Create(ctx, value)
 }
 
 // Save implements dbspi.Executor
 func (e *GormExecutor[T]) Save(ctx context.Context, value T) error {
+	applySaveCommonFields(ctx, e.commonFields, value)
 	return e.db.Save(ctx, value)
 }
 
 // Update implements dbspi.Executor
 func (e *GormExecutor[T]) Update(ctx context.Context, entity T) error {
+	applyUpdateCommonFields(ctx, e.commonFields, entity)
 	return e.db.Update(ctx, entity)
 }
 
@@ -669,6 +686,7 @@ func (e *GormExecutor[T]) Delete(ctx context.Context, entity T) error {
 
 // UpdateByQuery implements dbspi.Executor
 func (e *GormExecutor[T]) UpdateByQuery(ctx context.Context, query dbspi.Query, updater dbspi.Updater) error {
+	applyUpdateCommonFieldsToUpdater(ctx, e.commonFields, e.emptyEntityInstance, updater)
 	return e.db.UpdateByQuery(ctx, query, updater)
 }
 
@@ -679,18 +697,21 @@ func (e *GormExecutor[T]) DeleteByQuery(ctx context.Context, query dbspi.Query) 
 
 // BatchCreate implements dbspi.Executor
 func (e *GormExecutor[T]) BatchCreate(ctx context.Context, entities []T, batchSize int) error {
+	applyCreateCommonFieldsToSlice(ctx, e.commonFields, entities)
 	err := e.db.BatchCreate(ctx, entities, batchSize)
 	return err
 }
 
 // BatchSave implements dbspi.Executor
 func (e *GormExecutor[T]) BatchSave(ctx context.Context, entities []T) error {
+	applySaveCommonFieldsToSlice(ctx, e.commonFields, entities)
 	err := e.db.BatchSave(ctx, entities)
 	return err
 }
 
 // FirstOrCreate implements dbspi.Executor
 func (e *GormExecutor[T]) FirstOrCreate(ctx context.Context, entity T, query dbspi.Query) (T, error) {
+	applyCreateCommonFields(ctx, e.commonFields, entity)
 	err := e.db.FirstOrCreate(ctx, entity, query)
 	return entity, err
 }
@@ -708,10 +729,9 @@ func (e *GormExecutor[T]) Exec(ctx context.Context, sql string, args ...any) err
 }
 
 func (e *GormExecutor[T]) buildQueryById(id any) dbspi.Query {
-	var entity T
-	idFieldName := "id"
-	if ider, ok := any(entity).(dbspi.Ider); ok {
-		idFieldName = ider.IdFiledName()
+	idFieldName := dbspi.DefaultIdFieldName
+	if namer, ok := any(e.emptyEntityInstance).(dbspi.IdFieldNamer); ok {
+		idFieldName = namer.IdFieldName()
 	}
 	return NewQuery(NewField[any](idFieldName).Eq(&id))
 }
@@ -719,12 +739,6 @@ func (e *GormExecutor[T]) buildQueryById(id any) dbspi.Query {
 type GormDb struct {
 	db *gorm.DB
 }
-
-const (
-	defaultMaxOpenConns           = 100
-	defaultMaxIdleConns           = 10
-	defaultConnMaxLifetimeSeconds = 3600
-)
 
 // NewGormDb creates a new GormDb.
 func NewGormDb(dbConfig dbspi.DbServerConfig) dbspi.Db {
@@ -761,13 +775,13 @@ func NewGormDb(dbConfig dbspi.DbServerConfig) dbspi.Db {
 
 func normalizeDbServerConfig(cfg dbspi.DbServerConfig) dbspi.DbServerConfig {
 	if cfg.MaxOpenConns == 0 {
-		cfg.MaxOpenConns = defaultMaxOpenConns
+		cfg.MaxOpenConns = dbspi.DefaultMaxOpenConns
 	}
 	if cfg.MaxIdleConns == 0 {
-		cfg.MaxIdleConns = defaultMaxIdleConns
+		cfg.MaxIdleConns = dbspi.DefaultMaxIdleConns
 	}
 	if cfg.ConnMaxLifetimeSeconds == 0 {
-		cfg.ConnMaxLifetimeSeconds = defaultConnMaxLifetimeSeconds
+		cfg.ConnMaxLifetimeSeconds = dbspi.DefaultConnMaxLifetimeSeconds
 	}
 	return cfg
 }

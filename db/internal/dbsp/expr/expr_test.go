@@ -235,14 +235,14 @@ func TestTemplateMultipleVars(t *testing.T) {
 	}
 }
 
-func TestTemplateRejectsColRef(t *testing.T) {
+func TestTemplateTreatsColRefAsLiteral(t *testing.T) {
 	_, err := ParseTemplate("order_@{region}_db")
 	if err != nil {
 		t.Fatal("@{} in template should be treated as literal text, not cause an error")
 	}
 }
 
-func TestTemplateRejectsFuncCall(t *testing.T) {
+func TestTemplateTreatsFuncCallAsLiteral(t *testing.T) {
 	// #{...} is no longer special in templates, just literal text
 	tmpl, err := ParseTemplate("order_#{fill(1, 8)}")
 	if err != nil {

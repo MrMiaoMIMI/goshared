@@ -61,12 +61,6 @@ type Updater interface {
 	Params() map[string]any
 }
 
-// Ider is the interface for the entity that has an id field
-// Generally, it is used with xxById methods from Executor interface
-type Ider interface {
-	IdFiledName() string
-}
-
 type Entity interface {
 	TableName() string
 }
@@ -74,7 +68,7 @@ type Entity interface {
 // DbKeyProvider is an optional interface for entities to declare which
 // database configuration key they belong to.
 // Used by DbManager to route entities to the correct database/sharding group.
-// If not implemented, "default" is used.
+// If not implemented, DefaultDbKey is used.
 type DbKeyProvider interface {
 	DbKey() string
 }
@@ -86,8 +80,8 @@ type Executor[T Entity] interface {
 	Shard(key *ShardingKey) (Executor[T], error)
 
 	// Helpful Methods
-	// If T implements Ider interface, xxById methods get id field name from Ider.IdFiledName(),
-	// otherwise use "id" as the id field name
+	// If T implements IdFieldNamer, xxById methods get id field name from IdFieldName(),
+	// otherwise use DefaultIdFieldName as the id field name
 	GetById(ctx context.Context, id any) (T, error)
 	ExistsById(ctx context.Context, id any) (bool, T, error)
 	UpdateById(ctx context.Context, id any, updater Updater) error

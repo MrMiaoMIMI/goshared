@@ -8,12 +8,10 @@ import (
 
 var (
 	_ dbspi.EnhancedExecutor[_tableForCheck] = new(GormExecutor[_tableForCheck])
-
-	defaultDeletedFieldName = "deleted"
 )
 
 func NewDefaultDeletedFiled() dbspi.Field[bool] {
-	return NewField[bool](defaultDeletedFieldName)
+	return NewField[bool](dbspi.DefaultDeletedFieldName)
 }
 
 // SoftDeleteById implements dbspi.EnhancedExecutor
@@ -65,11 +63,11 @@ func (e *GormExecutor[T]) ExistsWithoutDeleted(ctx context.Context, query dbspi.
 }
 
 // getDeletedField returns the deleted field from the entity instance.
-// If the entity instance implements OptionalDeletedField interface, it returns the deleted field name from the interface.
+// If the entity instance implements DeletedFieldNamer interface, it returns the deleted field name from the interface.
 // Otherwise, it returns the default deleted field name.
 func (e *GormExecutor[T]) getDeletedField(entity dbspi.Entity) dbspi.Field[bool] {
-	if optionalDeletedField, ok := entity.(dbspi.OptionalDeletedField); ok {
-		return NewField[bool](optionalDeletedField.DeletedFiledName())
+	if namer, ok := entity.(dbspi.DeletedFieldNamer); ok {
+		return NewField[bool](namer.DeletedFieldName())
 	}
 	return NewDefaultDeletedFiled()
 }

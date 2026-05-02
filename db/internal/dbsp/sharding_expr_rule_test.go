@@ -782,7 +782,7 @@ type testOrder struct {
 }
 
 func (*testOrder) TableName() string   { return "order_tab" }
-func (*testOrder) IdFiledName() string { return "id" }
+func (*testOrder) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 func TestBuildShardingKeyResolver_SingleColumn(t *testing.T) {
 	tmpl, _ := expr.ParseTemplate("order_tab_${index}")
@@ -795,7 +795,7 @@ func TestBuildShardingKeyResolver_SingleColumn(t *testing.T) {
 
 	resolver := buildShardingKeyResolver(
 		reflect.TypeOf(&testOrder{}),
-		"id",
+		dbspi.DefaultIdFieldName,
 		nil,
 		tableRule,
 	)
@@ -818,7 +818,7 @@ func TestShardingKeyResolver_FromEntity(t *testing.T) {
 
 	resolver := buildShardingKeyResolver(
 		reflect.TypeOf(&testOrder{}),
-		"id",
+		dbspi.DefaultIdFieldName,
 		nil,
 		tableRule,
 	)
@@ -841,13 +841,13 @@ func TestShardingKeyResolver_FromId(t *testing.T) {
 
 	resolver := buildShardingKeyResolver(
 		reflect.TypeOf(&testOrder{}),
-		"id",
+		dbspi.DefaultIdFieldName,
 		nil,
 		tableRule,
 	)
 
 	columns := resolver.fromId(int64(1001))
-	if columns["id"] != int64(1001) {
+	if columns[dbspi.DefaultIdFieldName] != int64(1001) {
 		t.Fatalf("expected id=1001, got %v", columns)
 	}
 }
@@ -863,7 +863,7 @@ func TestShardingKeyResolver_BuildShardingKey_Success(t *testing.T) {
 
 	resolver := buildShardingKeyResolver(
 		reflect.TypeOf(&testOrder{}),
-		"id",
+		dbspi.DefaultIdFieldName,
 		nil,
 		tableRule,
 	)
@@ -895,7 +895,7 @@ func TestShardingKeyResolver_BuildShardingKey_MissingColumn(t *testing.T) {
 
 	resolver := buildShardingKeyResolver(
 		reflect.TypeOf(&testOrder{}),
-		"id",
+		dbspi.DefaultIdFieldName,
 		dbRule,
 		tableRule,
 	)
@@ -928,7 +928,7 @@ func TestShardingKeyResolver_BuildShardingKey_RangeColumnHint(t *testing.T) {
 
 	resolver := buildShardingKeyResolver(
 		reflect.TypeOf(&testOrder{}),
-		"id",
+		dbspi.DefaultIdFieldName,
 		nil,
 		tableRule,
 	)

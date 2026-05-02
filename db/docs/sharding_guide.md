@@ -45,14 +45,14 @@
 每个 Entity 需要实现 `TableName()` 接口。分片 Entity 还需通过 `DbKey()` 声明所属数据库组。
 
 ```go
-// 非分片 Entity — 使用 "default" 数据库
+// 非分片 Entity — 使用 dbspi.DefaultDbKey 数据库
 type User struct {
     ID   int64  `gorm:"primaryKey"`
     Name string `gorm:"column:name"`
 }
 
 func (*User) TableName() string   { return "user_tab" }
-func (*User) IdFiledName() string { return "id" }
+func (*User) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 // 分片 Entity — 路由到 "order_dbs" 数据库组
 type Order struct {
@@ -63,7 +63,7 @@ type Order struct {
 
 func (*Order) TableName() string   { return "order_tab" }
 func (*Order) DbKey() string       { return "order_dbs" }
-func (*Order) IdFiledName() string { return "id" }
+func (*Order) IdFieldName() string { return dbspi.DefaultIdFieldName }
 ```
 
 **接口一览**：
@@ -71,8 +71,8 @@ func (*Order) IdFiledName() string { return "id" }
 | 接口 | 必须 | 说明 |
 |------|------|------|
 | `TableName() string` | 是 | 逻辑表名 |
-| `DbKey() string` | 否 | 所属库组 key（不实现则走 `"default"`） |
-| `IdFiledName() string` | 否 | ID 列名（用于 `GetById`/`UpdateById` 等方法） |
+| `DbKey() string` | 否 | 所属库组 key（不实现则走 `dbspi.DefaultDbKey`） |
+| `IdFieldName() string` | 否 | ID 列名（用于 `GetById`/`UpdateById` 等方法） |
 
 **Auto ShardingKey 对 Entity 的要求**：Entity 的 struct field 上必须有 `gorm:"column:xxx"` tag 与配置中的 `@{xxx}` 列名对应，否则 auto 提取无法从 Entity 中读取分片字段值。
 
@@ -332,13 +332,12 @@ import (
 var cfg dbspi.DatabaseConfig
 yaml.Unmarshal(configBytes, &cfg)
 
-// 创建 DbManager 并设为全局默认
+// 创建 DbManager
 mgr := dbhelper.NewDbManager(cfg)
-dbhelper.SetDefault(mgr)
 
 // 获取 Executor
-userExec := dbhelper.For(&User{})     // → "default" 库
-orderExec := dbhelper.For(&Order{})   // → "order_dbs" 库组（根据 DbKey()）
+userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))     // → dbspi.DefaultDbKey 库
+orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))   // → "order_dbs" 库组（根据 DbKey()）
 ```
 
 ---
@@ -744,7 +743,7 @@ type User struct {
     Name string `gorm:"column:name"`
 }
 func (*User) TableName() string   { return "user_tab" }
-func (*User) IdFiledName() string { return "id" }
+func (*User) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 type Order struct {
     ID     int64 `gorm:"primaryKey"`
@@ -753,7 +752,7 @@ type Order struct {
 }
 func (*Order) TableName() string   { return "order_tab" }
 func (*Order) DbKey() string       { return "order_dbs" }
-func (*Order) IdFiledName() string { return "id" }
+func (*Order) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 func main() {
     // 1. 加载配置
@@ -763,11 +762,10 @@ func main() {
 
     // 2. 初始化 DbManager
     mgr := dbhelper.NewDbManager(cfg)
-    dbhelper.SetDefault(mgr)
 
     // 3. 获取 Executor
-    userExec := dbhelper.For(&User{})
-    orderExec := dbhelper.For(&Order{})
+    userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))
+    orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
     shopIdField := dbhelper.NewField[int64]("shop_id")
 
     ctx := context.Background()

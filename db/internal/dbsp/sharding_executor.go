@@ -17,6 +17,7 @@ type ShardedExecutorConfig struct {
 	DbRule         dbspi.DbShardingRule
 	TableRule      dbspi.TableShardingRule
 	MaxConcurrency int
+	CommonFields   dbspi.CommonFieldOptions
 }
 
 // shardingKeyResolver auto-extracts sharding key column values from CRUD parameters.
@@ -24,7 +25,7 @@ type ShardedExecutorConfig struct {
 type shardingKeyResolver struct {
 	requiredCols []string       // union of db rule + table rule required columns
 	fieldMap     map[string]int // gorm column name -> struct field index
-	idColumnName string         // from Ider or default "id"
+	idColumnName string         // from IdFieldNamer or DefaultIdFieldName
 }
 
 // buildShardingKeyResolver creates a resolver from the sharding rules and entity type.
@@ -316,6 +317,7 @@ type shardedExecutor[T dbspi.Entity] struct {
 	tableRule      dbspi.TableShardingRule
 	maxConcurrency int
 	keyResolver    *shardingKeyResolver
+	commonFields   dbspi.CommonFieldOptions
 }
 
 func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *shardedExecutor[T] {
@@ -326,9 +328,9 @@ func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *sh
 		panic("sharded executor requires at least one of WithTableRule or WithDbRule")
 	}
 
-	idColumnName := "id"
-	if ider, ok := any(entity).(dbspi.Ider); ok {
-		idColumnName = ider.IdFiledName()
+	idColumnName := dbspi.DefaultIdFieldName
+	if namer, ok := any(entity).(dbspi.IdFieldNamer); ok {
+		idColumnName = namer.IdFieldName()
 	}
 
 	entityType := reflect.TypeOf(entity)
@@ -341,6 +343,7 @@ func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *sh
 		tableRule:      cfg.TableRule,
 		maxConcurrency: cfg.MaxConcurrency,
 		keyResolver:    resolver,
+		commonFields:   cfg.CommonFields,
 	}
 }
 
@@ -397,7 +400,7 @@ func (e *shardedExecutor[T]) resolveExecutor(sk *dbspi.ShardingKey) (dbspi.Execu
 	if err != nil {
 		return nil, err
 	}
-	return NewExecutorWithTableName(db, e.entity, tableName), nil
+	return NewExecutorWithTableNameAndCommonFields(db, e.entity, tableName, e.commonFields), nil
 }
 
 // resolveFromCtx extracts the ShardingKey from context and resolves the executor.
@@ -855,7 +858,7 @@ func (e *shardedExecutor[T]) FindAll(ctx context.Context, query dbspi.Query, bat
 	for _, target := range targets {
 		target := target
 		g.Go(func() error {
-			exec := NewExecutorWithTableName(target.db, e.entity, target.tableName)
+			exec := NewExecutorWithTableNameAndCommonFields(target.db, e.entity, target.tableName, e.commonFields)
 			rows, err := e.fetchAllFromShard(gCtx, exec, query, batchSize)
 			if err != nil {
 				return err
@@ -917,10 +920,10 @@ func (e *shardedExecutor[T]) fetchAllFromShard(ctx context.Context, exec dbspi.E
 
 // getIdFieldName returns the ID field name from the entity.
 func (e *shardedExecutor[T]) getIdFieldName() string {
-	if ider, ok := any(e.entity).(dbspi.Ider); ok {
-		return ider.IdFiledName()
+	if namer, ok := any(e.entity).(dbspi.IdFieldNamer); ok {
+		return namer.IdFieldName()
 	}
-	return "id"
+	return dbspi.DefaultIdFieldName
 }
 
 // extractFieldValue extracts the value of a column from an entity using reflection.
@@ -986,7 +989,7 @@ func (e *shardedExecutor[T]) CountAll(ctx context.Context, query dbspi.Query) (u
 	for _, target := range targets {
 		target := target
 		g.Go(func() error {
-			exec := NewExecutorWithTableName(target.db, e.entity, target.tableName)
+			exec := NewExecutorWithTableNameAndCommonFields(target.db, e.entity, target.tableName, e.commonFields)
 			count, err := exec.Count(gCtx, query)
 			if err != nil {
 				return err

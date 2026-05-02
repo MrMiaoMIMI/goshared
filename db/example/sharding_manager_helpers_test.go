@@ -56,11 +56,11 @@ func testNamedServer(key string) dbspi.NamedDbServerConfig {
 func managedExecutor[T dbspi.Entity](entity T, entry dbspi.DatabaseEntry) dbspi.Executor[T] {
 	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
 		Databases: map[string]dbspi.DatabaseEntry{
-			"default":   defaultTestDatabaseEntry(),
-			"order_dbs": entry,
+			dbspi.DefaultDbKey: defaultTestDatabaseEntry(),
+			"order_dbs":        entry,
 		},
 	})
-	return dbhelper.For(entity, mgr)
+	return dbhelper.For(entity, dbhelper.WithDbManager(mgr))
 }
 
 func cachedManagedExecutor[T dbspi.Entity](key string, entity T, entry dbspi.DatabaseEntry) dbspi.Executor[T] {

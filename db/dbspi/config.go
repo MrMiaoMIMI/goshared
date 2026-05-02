@@ -2,6 +2,7 @@ package dbspi
 
 // DatabaseConfig is the top-level configuration for all databases.
 // It maps database group names to their connection and sharding configurations.
+// Entities without DbKeyProvider use DefaultDbKey.
 type DatabaseConfig struct {
 	Databases map[string]DatabaseEntry `yaml:"databases" json:"databases"`
 }
@@ -20,6 +21,8 @@ type DatabaseEntry struct {
 	Debug    bool   `yaml:"debug" json:"debug"`
 
 	// Connection pool.
+	// Zero values use DefaultMaxOpenConns, DefaultMaxIdleConns, and
+	// DefaultConnMaxLifetimeSeconds.
 	MaxOpenConns           int `yaml:"max_open_conns" json:"max_open_conns"`
 	MaxIdleConns           int `yaml:"max_idle_conns" json:"max_idle_conns"`
 	ConnMaxLifetimeSeconds int `yaml:"conn_max_lifetime_seconds" json:"conn_max_lifetime_seconds"`
@@ -63,6 +66,8 @@ type DbServerConfig struct {
 	DbName   string `yaml:"db_name" json:"db_name"`
 	Debug    bool   `yaml:"debug" json:"debug"`
 
+	// Zero values use DefaultMaxOpenConns, DefaultMaxIdleConns, and
+	// DefaultConnMaxLifetimeSeconds.
 	MaxOpenConns           int `yaml:"max_open_conns" json:"max_open_conns"`
 	MaxIdleConns           int `yaml:"max_idle_conns" json:"max_idle_conns"`
 	ConnMaxLifetimeSeconds int `yaml:"conn_max_lifetime_seconds" json:"conn_max_lifetime_seconds"`
@@ -93,7 +98,11 @@ type TableShardConfig struct {
 }
 
 // DbManager is an opaque database manager handle.
-// Create one with dbhelper.NewDbManager, then pass it to dbhelper.For or dbhelper.SetDefault.
+//
+// Create one with dbhelper.NewDbManager, then pass it to dbhelper.For,
+// dbhelper.ForEnhance, or dbhelper.SetDefault. This interface is a public
+// handle for dbhelper-created managers; external implementations are not
+// supported by the default dbhelper executors.
 type DbManager interface {
 	DBManager()
 }
