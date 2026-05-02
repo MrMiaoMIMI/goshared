@@ -1,6 +1,7 @@
 package dbsp
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
@@ -351,6 +352,31 @@ type entityOverride struct {
 	maxConcurrency *int
 }
 
+type txBoundDbRule struct {
+	rule      dbspi.DbShardingRule
+	targetKey string
+}
+
+func (r txBoundDbRule) ResolveDbKey(key *dbspi.ShardingKey) (string, error) {
+	got, err := r.rule.ResolveDbKey(key)
+	if err != nil {
+		return "", err
+	}
+	if got != r.targetKey {
+		return "", fmt.Errorf("cross-shard transaction not allowed: transaction db target %q, operation routes to %q", r.targetKey, got)
+	}
+	return got, nil
+}
+
+type txBoundDbRuleWithColumns struct {
+	txBoundDbRule
+	provider dbspi.ShardingKeyColumnsProvider
+}
+
+func (r txBoundDbRuleWithColumns) RequiredColumns() []string {
+	return r.provider.RequiredColumns()
+}
+
 // DbManager manages database connections and sharding configurations.
 type DbManager struct {
 	mu           sync.RWMutex
@@ -367,6 +393,90 @@ func (m *DbManager) CommonFieldOptions() dbspi.CommonFieldOptions {
 		return dbspi.DefaultCommonFieldOptions()
 	}
 	return m.commonFields
+}
+
+// Transaction starts a transaction for one database group and passes a
+// transaction-scoped manager to fn. The scoped manager preserves the selected
+// group's table rules but routes all database access through the transaction Db.
+func (m *DbManager) Transaction(ctx context.Context, dbKey string, shardingKey *dbspi.ShardingKey, commonFields dbspi.CommonFieldOptions, fn func(txMgr *DbManager) error) error {
+	if m == nil {
+		m = DefaultDbManager()
+	}
+	if dbKey == "" {
+		dbKey = dbspi.DefaultDbKey
+	}
+
+	m.mu.RLock()
+	entry, ok := m.entries[dbKey]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("dbhelper: database config %q not found", dbKey)
+	}
+
+	db, targetKey, err := resolveTransactionDb(entry, shardingKey)
+	if err != nil {
+		return err
+	}
+
+	return db.Transaction(ctx, func(txDb dbspi.Db) error {
+		txEntry := cloneEntryForTransaction(entry, txDb, targetKey)
+		txMgr := &DbManager{
+			entries: map[string]*resolvedDbEntry{
+				dbKey: txEntry,
+			},
+			commonFields: commonFields.Normalize(),
+		}
+		return fn(txMgr)
+	})
+}
+
+func resolveTransactionDb(entry *resolvedDbEntry, shardingKey *dbspi.ShardingKey) (dbspi.Db, string, error) {
+	if entry.dbRule != nil {
+		if shardingKey == nil {
+			return nil, "", fmt.Errorf("dbhelper: transaction on db-sharded database requires WithTxShardingKey")
+		}
+		targetKey, err := entry.dbRule.ResolveDbKey(shardingKey)
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve transaction db key failed: %w", err)
+		}
+		db, err := findDbTarget(entry.dbs, targetKey)
+		if err != nil {
+			return nil, "", err
+		}
+		return db, targetKey, nil
+	}
+
+	if entry.db != nil {
+		return entry.db, "0", nil
+	}
+	if len(entry.dbs) > 0 {
+		return entry.dbs[0].Db, entry.dbs[0].Key, nil
+	}
+	return nil, "", fmt.Errorf("dbhelper: transaction database has no Db target")
+}
+
+func findDbTarget(dbs []dbspi.DbTarget, targetKey string) (dbspi.Db, error) {
+	for _, target := range dbs {
+		if target.Key == targetKey {
+			return target.Db, nil
+		}
+	}
+	return nil, fmt.Errorf("no DbTarget found for key: %s", targetKey)
+}
+
+func cloneEntryForTransaction(entry *resolvedDbEntry, txDb dbspi.Db, targetKey string) *resolvedDbEntry {
+	txEntry := *entry
+	txEntry.db = txDb
+	txEntry.dbs = []dbspi.DbTarget{{Key: targetKey, Db: txDb}}
+	if entry.dbRule != nil {
+		boundRule := txBoundDbRule{rule: entry.dbRule, targetKey: targetKey}
+		if provider, ok := entry.dbRule.(dbspi.ShardingKeyColumnsProvider); ok {
+			txEntry.dbRule = txBoundDbRuleWithColumns{txBoundDbRule: boundRule, provider: provider}
+		} else {
+			txEntry.dbRule = boundRule
+		}
+	}
+	return &txEntry
 }
 
 var (

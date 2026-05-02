@@ -20,11 +20,26 @@ type ForOption interface {
 	applyForOption(*forOptions)
 }
 
+// TransactionOption configures a transaction created by Transaction.
+//
+// TransactionOption is sealed to this package. Use the WithXxx helpers in
+// dbhelper instead of implementing this interface directly.
+type TransactionOption interface {
+	applyTransactionOption(*transactionOptions)
+}
+
 // CommonFieldOption can be used both as a DbManager global option and as a
-// per-table For/ForEnhance override.
+// per-table For/ForEnhance/ForTx override.
 type CommonFieldOption interface {
 	ManagerOption
 	ForOption
+	TransactionOption
+}
+
+// DbManagerOption selects the DbManager used by For/ForEnhance or Transaction.
+type DbManagerOption interface {
+	ForOption
+	TransactionOption
 }
 
 type managerOptions struct {
@@ -33,6 +48,13 @@ type managerOptions struct {
 
 type forOptions struct {
 	manager      dbspi.DbManager
+	commonFields commonFieldPatch
+}
+
+type transactionOptions struct {
+	manager      dbspi.DbManager
+	dbKey        string
+	shardingKey  *dbspi.ShardingKey
 	commonFields commonFieldPatch
 }
 
@@ -55,9 +77,25 @@ func (f commonFieldOptionFunc) applyForOption(o *forOptions) {
 	f(&o.commonFields)
 }
 
-type forOptionFunc func(*forOptions)
+func (f commonFieldOptionFunc) applyTransactionOption(o *transactionOptions) {
+	f(&o.commonFields)
+}
 
-func (f forOptionFunc) applyForOption(o *forOptions) {
+type dbManagerOption struct {
+	manager dbspi.DbManager
+}
+
+func (o dbManagerOption) applyForOption(opts *forOptions) {
+	opts.manager = o.manager
+}
+
+func (o dbManagerOption) applyTransactionOption(opts *transactionOptions) {
+	opts.manager = o.manager
+}
+
+type transactionOptionFunc func(*transactionOptions)
+
+func (f transactionOptionFunc) applyTransactionOption(o *transactionOptions) {
 	f(o)
 }
 
@@ -96,11 +134,27 @@ func WithCommonFieldOperatorProvider(provider dbspi.OperatorProvider) CommonFiel
 	})
 }
 
-// WithDbManager makes For/ForEnhance use the given DbManager instead of
-// the global default manager.
-func WithDbManager(mgr dbspi.DbManager) ForOption {
-	return forOptionFunc(func(o *forOptions) {
-		o.manager = mgr
+// WithDbManager makes For/ForEnhance/Transaction use the given DbManager
+// instead of the global default manager.
+func WithDbManager(mgr dbspi.DbManager) DbManagerOption {
+	return dbManagerOption{manager: mgr}
+}
+
+// WithTxDbKey selects the database group used by a transaction.
+//
+// If omitted, Transaction uses dbspi.DefaultDbKey.
+func WithTxDbKey(dbKey string) TransactionOption {
+	return transactionOptionFunc(func(o *transactionOptions) {
+		o.dbKey = dbKey
+	})
+}
+
+// WithTxShardingKey selects the physical database shard used by a transaction.
+//
+// It is required when the selected database group has database-level sharding.
+func WithTxShardingKey(key *dbspi.ShardingKey) TransactionOption {
+	return transactionOptionFunc(func(o *transactionOptions) {
+		o.shardingKey = key
 	})
 }
 
