@@ -8,12 +8,12 @@ import (
 )
 
 type commonFieldTestEntity struct {
-	dbspi.CommonDo
+	dbspi.CommonFields
 	Name string `gorm:"column:name"`
 }
 
 type commonFieldTimeOnlyTestEntity struct {
-	dbspi.TimeDo
+	dbspi.TimeFields
 	Name string `gorm:"column:name"`
 }
 
@@ -37,7 +37,7 @@ func TestDefaultCommonFieldAutoFillOptionsEnableAutofill(t *testing.T) {
 	applyCreateCommonFields(context.Background(), opts, entity)
 
 	if entity.Ctime != 12345 || entity.Mtime != 12345 {
-		t.Fatalf("default common field options should enable autofill: %+v", entity.TimeDo)
+		t.Fatalf("default common field options should enable autofill: %+v", entity.TimeFields)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestDisabledCommonFieldAutoFillOptionsSkipAutofill(t *testing.T) {
 	applyCreateCommonFields(context.Background(), dbspi.DisabledCommonFieldAutoFillOptions(), entity)
 
 	if entity.Ctime != 0 || entity.Mtime != 0 {
-		t.Fatalf("disabled common field options should skip autofill: %+v", entity.TimeDo)
+		t.Fatalf("disabled common field options should skip autofill: %+v", entity.TimeFields)
 	}
 }
 
@@ -71,33 +71,33 @@ func TestApplyCreateCommonFields(t *testing.T) {
 	}
 }
 
-func TestCommonDoManagedFields(t *testing.T) {
+func TestCommonFieldsManagedFields(t *testing.T) {
 	entity := &commonFieldTestEntity{}
 	entity.SetId(9)
 	entity.SetDeleted(true)
 
 	if entity.Id != 9 || entity.GetId() != 9 || entity.IdFieldName() != dbspi.DefaultIdFieldName {
-		t.Fatalf("id managed fields not synced: %+v", entity.CommonDo)
+		t.Fatalf("id managed fields not synced: %+v", entity.CommonFields)
 	}
-	if !entity.Deleted || !entity.GetDeleted() || entity.DeletedFieldName() != dbspi.DefaultDeletedFieldName {
-		t.Fatalf("deleted managed fields not synced: %+v", entity.CommonDo)
+	if !entity.Deleted || !entity.GetDeleted() || entity.SoftDeleteFieldName() != dbspi.DefaultDeletedFieldName {
+		t.Fatalf("deleted managed fields not synced: %+v", entity.CommonFields)
 	}
 }
 
 func TestApplyCreateCommonFieldsDoesNotOverwriteExplicitValuesByDefault(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "creator_a")
 	entity := &commonFieldTestEntity{
-		CommonDo: dbspi.CommonDo{
-			CreateTimeDo: dbspi.CreateTimeDo{
+		CommonFields: dbspi.CommonFields{
+			CreateTimeField: dbspi.CreateTimeField{
 				Ctime: 1,
 			},
-			UpdateTimeDo: dbspi.UpdateTimeDo{
+			UpdateTimeField: dbspi.UpdateTimeField{
 				Mtime: 2,
 			},
-			CreatorDo: dbspi.CreatorDo{
+			CreatorField: dbspi.CreatorField{
 				Creator: "creator_existing",
 			},
-			UpdaterDo: dbspi.UpdaterDo{
+			UpdaterField: dbspi.UpdaterField{
 				Updater: "updater_existing",
 			},
 		},
@@ -106,7 +106,7 @@ func TestApplyCreateCommonFieldsDoesNotOverwriteExplicitValuesByDefault(t *testi
 	applyCreateCommonFields(ctx, testCommonFieldAutoFillOptions(), entity)
 
 	if entity.Ctime != 1 || entity.Mtime != 2 || entity.Creator != "creator_existing" || entity.Updater != "updater_existing" {
-		t.Fatalf("create common fields should not overwrite explicit values: %+v", entity.CommonDo)
+		t.Fatalf("create common fields should not overwrite explicit values: %+v", entity.CommonFields)
 	}
 }
 
@@ -115,17 +115,17 @@ func TestApplyCreateCommonFieldsCanOverwriteExplicitValues(t *testing.T) {
 	opts := testCommonFieldAutoFillOptions()
 	opts.OverwriteExplicitValues = true
 	entity := &commonFieldTestEntity{
-		CommonDo: dbspi.CommonDo{
-			CreateTimeDo: dbspi.CreateTimeDo{
+		CommonFields: dbspi.CommonFields{
+			CreateTimeField: dbspi.CreateTimeField{
 				Ctime: 1,
 			},
-			UpdateTimeDo: dbspi.UpdateTimeDo{
+			UpdateTimeField: dbspi.UpdateTimeField{
 				Mtime: 2,
 			},
-			CreatorDo: dbspi.CreatorDo{
+			CreatorField: dbspi.CreatorField{
 				Creator: "creator_existing",
 			},
-			UpdaterDo: dbspi.UpdaterDo{
+			UpdaterField: dbspi.UpdaterField{
 				Updater: "updater_existing",
 			},
 		},
@@ -134,24 +134,24 @@ func TestApplyCreateCommonFieldsCanOverwriteExplicitValues(t *testing.T) {
 	applyCreateCommonFields(ctx, opts, entity)
 
 	if entity.Ctime != 12345 || entity.Mtime != 12345 || entity.Creator != "creator_a" || entity.Updater != "creator_a" {
-		t.Fatalf("create common fields should overwrite explicit values when configured: %+v", entity.CommonDo)
+		t.Fatalf("create common fields should overwrite explicit values when configured: %+v", entity.CommonFields)
 	}
 }
 
 func TestApplySaveCommonFieldsDoesNotOverwriteExplicitValuesByDefault(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
 	entity := &commonFieldTestEntity{
-		CommonDo: dbspi.CommonDo{
-			CreateTimeDo: dbspi.CreateTimeDo{
+		CommonFields: dbspi.CommonFields{
+			CreateTimeField: dbspi.CreateTimeField{
 				Ctime: 1,
 			},
-			UpdateTimeDo: dbspi.UpdateTimeDo{
+			UpdateTimeField: dbspi.UpdateTimeField{
 				Mtime: 2,
 			},
-			CreatorDo: dbspi.CreatorDo{
+			CreatorField: dbspi.CreatorField{
 				Creator: "creator_existing",
 			},
-			UpdaterDo: dbspi.UpdaterDo{
+			UpdaterField: dbspi.UpdaterField{
 				Updater: "updater_existing",
 			},
 		},
@@ -198,17 +198,17 @@ func TestApplySaveCommonFieldsCanOverwriteExplicitValues(t *testing.T) {
 	opts := testCommonFieldAutoFillOptions()
 	opts.OverwriteExplicitValues = true
 	entity := &commonFieldTestEntity{
-		CommonDo: dbspi.CommonDo{
-			CreateTimeDo: dbspi.CreateTimeDo{
+		CommonFields: dbspi.CommonFields{
+			CreateTimeField: dbspi.CreateTimeField{
 				Ctime: 1,
 			},
-			UpdateTimeDo: dbspi.UpdateTimeDo{
+			UpdateTimeField: dbspi.UpdateTimeField{
 				Mtime: 2,
 			},
-			CreatorDo: dbspi.CreatorDo{
+			CreatorField: dbspi.CreatorField{
 				Creator: "creator_existing",
 			},
-			UpdaterDo: dbspi.UpdaterDo{
+			UpdaterField: dbspi.UpdaterField{
 				Updater: "updater_existing",
 			},
 		},
@@ -217,18 +217,18 @@ func TestApplySaveCommonFieldsCanOverwriteExplicitValues(t *testing.T) {
 	applySaveCommonFields(ctx, opts, entity)
 
 	if entity.Ctime != 12345 || entity.Mtime != 12345 || entity.Creator != "updater_a" || entity.Updater != "updater_a" {
-		t.Fatalf("save common fields should overwrite explicit values when configured: %+v", entity.CommonDo)
+		t.Fatalf("save common fields should overwrite explicit values when configured: %+v", entity.CommonFields)
 	}
 }
 
 func TestApplyUpdateCommonFieldsDoesNotOverwriteExplicitValuesByDefault(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
 	entity := &commonFieldTestEntity{
-		CommonDo: dbspi.CommonDo{
-			UpdateTimeDo: dbspi.UpdateTimeDo{
+		CommonFields: dbspi.CommonFields{
+			UpdateTimeField: dbspi.UpdateTimeField{
 				Mtime: 2,
 			},
-			UpdaterDo: dbspi.UpdaterDo{
+			UpdaterField: dbspi.UpdaterField{
 				Updater: "updater_existing",
 			},
 		},
@@ -263,11 +263,11 @@ func TestApplyUpdateCommonFieldsCanOverwriteExplicitValues(t *testing.T) {
 	opts := testCommonFieldAutoFillOptions()
 	opts.OverwriteExplicitValues = true
 	entity := &commonFieldTestEntity{
-		CommonDo: dbspi.CommonDo{
-			UpdateTimeDo: dbspi.UpdateTimeDo{
+		CommonFields: dbspi.CommonFields{
+			UpdateTimeField: dbspi.UpdateTimeField{
 				Mtime: 2,
 			},
-			UpdaterDo: dbspi.UpdaterDo{
+			UpdaterField: dbspi.UpdaterField{
 				Updater: "updater_existing",
 			},
 		},
@@ -276,11 +276,11 @@ func TestApplyUpdateCommonFieldsCanOverwriteExplicitValues(t *testing.T) {
 	applyUpdateCommonFields(ctx, opts, entity)
 
 	if entity.Mtime != 12345 || entity.Updater != "updater_a" {
-		t.Fatalf("update common fields should overwrite explicit values when configured: %+v", entity.CommonDo)
+		t.Fatalf("update common fields should overwrite explicit values when configured: %+v", entity.CommonFields)
 	}
 }
 
-func TestApplyCommonFieldsSupportsTimeDoOnly(t *testing.T) {
+func TestApplyCommonFieldsSupportsTimeFieldsOnly(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "operator_a")
 	entity := &commonFieldTimeOnlyTestEntity{}
 
@@ -300,7 +300,7 @@ func TestApplyCommonFieldsSupportsTimeDoOnly(t *testing.T) {
 		t.Fatalf("mtime = %v, want 12345", params[dbspi.DefaultMtimeFieldName])
 	}
 	if _, ok := params[dbspi.DefaultUpdaterFieldName]; ok {
-		t.Fatalf("updater should not be added for TimeDo-only entity: %v", params)
+		t.Fatalf("updater should not be added for TimeFields-only entity: %v", params)
 	}
 }
 

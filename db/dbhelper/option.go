@@ -24,17 +24,17 @@ type TransactionOption interface {
 	applyTransactionOption(*transactionOptions)
 }
 
-// CommonFieldOption can be used both as a Manager global option and as a
+// CommonFieldAutoFillOption can be used both as a Manager global option and as a
 // per-table NewExecutor/NewEnhancedExecutor override.
-type CommonFieldOption interface {
+type CommonFieldAutoFillOption interface {
 	ManagerOption
 	ExecutorOption
 	TransactionOption
 }
 
-// UseManagerOption selects the Manager used by NewExecutor, NewEnhancedExecutor,
+// ManagerSelectionOption selects the Manager used by NewExecutor, NewEnhancedExecutor,
 // or Transaction.
-type UseManagerOption interface {
+type ManagerSelectionOption interface {
 	ExecutorOption
 	TransactionOption
 }

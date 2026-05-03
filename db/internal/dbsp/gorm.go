@@ -730,7 +730,7 @@ func (e *GormExecutor[T]) Exec(ctx context.Context, sql string, args ...any) err
 
 func (e *GormExecutor[T]) buildQueryById(id any) dbspi.Query {
 	idFieldName := dbspi.DefaultIdFieldName
-	if namer, ok := any(e.emptyEntityInstance).(dbspi.IdFieldNamer); ok {
+	if namer, ok := any(e.emptyEntityInstance).(dbspi.IdFieldNameProvider); ok {
 		idFieldName = namer.IdFieldName()
 	}
 	return NewQuery(NewField[any](idFieldName).Eq(&id))

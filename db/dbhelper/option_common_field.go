@@ -3,7 +3,7 @@ package dbhelper
 import "github.com/MrMiaoMIMI/goshared/db/dbspi"
 
 // WithCommonFieldAutoFill enables or disables common-field autofill.
-func WithCommonFieldAutoFill(enabled bool) CommonFieldOption {
+func WithCommonFieldAutoFill(enabled bool) CommonFieldAutoFillOption {
 	return commonFieldOptionFunc(func(p *commonFieldPatch) {
 		p.setEnabled = true
 		p.enabled = enabled
@@ -15,7 +15,7 @@ func WithCommonFieldAutoFill(enabled bool) CommonFieldOption {
 //
 // By default, explicit values are preserved and only zero-value ctime/mtime or
 // empty creator/updater are filled.
-func WithCommonFieldOverwriteExplicitValues(overwrite bool) CommonFieldOption {
+func WithCommonFieldOverwriteExplicitValues(overwrite bool) CommonFieldAutoFillOption {
 	return commonFieldOptionFunc(func(p *commonFieldPatch) {
 		p.setOverwriteExplicitValues = true
 		p.overwriteExplicitValues = overwrite
@@ -24,14 +24,14 @@ func WithCommonFieldOverwriteExplicitValues(overwrite bool) CommonFieldOption {
 
 // WithCommonFieldTimeProvider sets the timestamp provider for ctime/mtime.
 // The default provider returns Unix milliseconds.
-func WithCommonFieldTimeProvider(provider dbspi.TimeProvider) CommonFieldOption {
+func WithCommonFieldTimeProvider(provider dbspi.TimeProvider) CommonFieldAutoFillOption {
 	return commonFieldOptionFunc(func(p *commonFieldPatch) {
 		p.timeProvider = provider
 	})
 }
 
 // WithCommonFieldOperatorProvider sets the operator provider for common fields.
-func WithCommonFieldOperatorProvider(provider dbspi.OperatorProvider) CommonFieldOption {
+func WithCommonFieldOperatorProvider(provider dbspi.OperatorProvider) CommonFieldAutoFillOption {
 	return commonFieldOptionFunc(func(p *commonFieldPatch) {
 		p.operatorProvider = provider
 	})

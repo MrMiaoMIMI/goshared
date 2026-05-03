@@ -35,7 +35,7 @@ type DatabaseGroupConfig struct {
 	TableSharding *TableShardingConfig `yaml:"table_sharding" json:"table_sharding"`
 
 	// Per-table sharding overrides.
-	TableRules []TableRule `yaml:"table_rules" json:"table_rules"`
+	TableRules []TableShardingRuleConfig `yaml:"table_rules" json:"table_rules"`
 
 	// Multi-server configuration.
 	Servers []NamedServerConfig `yaml:"servers" json:"servers"`
@@ -44,8 +44,8 @@ type DatabaseGroupConfig struct {
 	MaxConcurrency int `yaml:"max_concurrency" json:"max_concurrency"`
 }
 
-// TableRule defines a table sharding override for a group of tables.
-type TableRule struct {
+// TableShardingRuleConfig defines a table sharding override for a group of tables.
+type TableShardingRuleConfig struct {
 	// Tables lists the logical table names this rule applies to.
 	Tables []string `yaml:"tables" json:"tables"`
 

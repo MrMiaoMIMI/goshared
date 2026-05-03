@@ -5,7 +5,7 @@ const (
 	// implement DatabaseGroupKeyProvider.
 	DefaultDatabaseGroupKey = "default"
 
-	// Default common field names used by CommonDo and executor helper methods.
+	// Default common field names used by CommonFields and executor helper methods.
 	DefaultIdFieldName      = "id"
 	DefaultDeletedFieldName = "deleted"
 	DefaultCreatorFieldName = "creator"

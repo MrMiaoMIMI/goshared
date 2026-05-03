@@ -28,11 +28,11 @@ func NewShardedExecutorWithOptions[T dbspi.Entity](entity T, opts ...ShardOption
 		opt(cfg)
 	}
 	return NewShardedExecutor(entity, ShardedExecutorConfig{
-		Dbs:            cfg.dbs,
-		DbRule:         cfg.dbRule,
-		TableRule:      cfg.tableRule,
-		MaxConcurrency: cfg.maxConcurrency,
-		CommonFields:   cfg.commonFields,
+		Dbs:               cfg.dbs,
+		DbRule:            cfg.dbRule,
+		TableShardingRule: cfg.tableRule,
+		MaxConcurrency:    cfg.maxConcurrency,
+		CommonFields:      cfg.commonFields,
 	})
 }
 
@@ -432,7 +432,7 @@ func (m *Manager) Transaction(ctx context.Context, dbKey string, shardingKey *db
 func resolveTransactionDb(entry *resolvedDbEntry, shardingKey *dbspi.ShardingKey) (dbSession, string, error) {
 	if entry.dbRule != nil {
 		if shardingKey == nil {
-			return nil, "", fmt.Errorf("dbhelper: transaction on db-sharded database requires WithTxShardingKey")
+			return nil, "", fmt.Errorf("dbhelper: transaction on db-sharded database requires WithTransactionShardingKey")
 		}
 		targetKey, err := entry.dbRule.ResolveDatabaseTargetKey(shardingKey)
 		if err != nil {

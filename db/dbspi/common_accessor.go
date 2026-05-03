@@ -1,21 +1,21 @@
 package dbspi
 
-type IdFieldNamer interface {
+type IdFieldNameProvider interface {
 	IdFieldName() string
 }
 
-type SoftDeleteFieldNamer interface {
-	DeletedFieldName() string
+type SoftDeleteFieldNameProvider interface {
+	SoftDeleteFieldName() string
 }
 
 type IdAccessor interface {
-	IdFieldNamer
+	IdFieldNameProvider
 	GetId() uint64
 	SetId(uint64)
 }
 
 type SoftDeleteAccessor interface {
-	SoftDeleteFieldNamer
+	SoftDeleteFieldNameProvider
 	GetDeleted() bool
 	SetDeleted(bool)
 }
@@ -45,21 +45,21 @@ type UpdaterAccessor interface {
 }
 
 var (
-	_ IdAccessor         = (*IdDo)(nil)
-	_ SoftDeleteAccessor = (*SoftDeleteDo)(nil)
-	_ CreateTimeAccessor = (*CreateTimeDo)(nil)
-	_ UpdateTimeAccessor = (*UpdateTimeDo)(nil)
-	_ CreatorAccessor    = (*CreatorDo)(nil)
-	_ UpdaterAccessor    = (*UpdaterDo)(nil)
-	_ CreateTimeAccessor = (*TimeDo)(nil)
-	_ UpdateTimeAccessor = (*TimeDo)(nil)
-	_ CreatorAccessor    = (*OperatorDo)(nil)
-	_ UpdaterAccessor    = (*OperatorDo)(nil)
+	_ IdAccessor         = (*IdField)(nil)
+	_ SoftDeleteAccessor = (*SoftDeleteField)(nil)
+	_ CreateTimeAccessor = (*CreateTimeField)(nil)
+	_ UpdateTimeAccessor = (*UpdateTimeField)(nil)
+	_ CreatorAccessor    = (*CreatorField)(nil)
+	_ UpdaterAccessor    = (*UpdaterField)(nil)
+	_ CreateTimeAccessor = (*TimeFields)(nil)
+	_ UpdateTimeAccessor = (*TimeFields)(nil)
+	_ CreatorAccessor    = (*OperatorFields)(nil)
+	_ UpdaterAccessor    = (*OperatorFields)(nil)
 
-	_ IdAccessor         = (*CommonDo)(nil)
-	_ SoftDeleteAccessor = (*CommonDo)(nil)
-	_ CreateTimeAccessor = (*CommonDo)(nil)
-	_ UpdateTimeAccessor = (*CommonDo)(nil)
-	_ CreatorAccessor    = (*CommonDo)(nil)
-	_ UpdaterAccessor    = (*CommonDo)(nil)
+	_ IdAccessor         = (*CommonFields)(nil)
+	_ SoftDeleteAccessor = (*CommonFields)(nil)
+	_ CreateTimeAccessor = (*CommonFields)(nil)
+	_ UpdateTimeAccessor = (*CommonFields)(nil)
+	_ CreatorAccessor    = (*CommonFields)(nil)
+	_ UpdaterAccessor    = (*CommonFields)(nil)
 )

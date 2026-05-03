@@ -135,7 +135,7 @@ func Test_Transaction_ShardedSameDb(t *testing.T) {
 			return err
 		}
 		return txOrderExec.Create(ctx, &Order{ShopID: shopID2, Amount: amount})
-	}, dbhelper.WithManager(mgr), dbhelper.WithTxDatabaseGroupKey("order_dbs"))
+	}, dbhelper.WithManager(mgr), dbhelper.WithTransactionDatabaseGroupKey("order_dbs"))
 	requireNoError(t, err)
 
 	assertOrderExists(t, ctx, orderExec, shopID1, amount)
@@ -165,7 +165,7 @@ func Test_Transaction_DbShardCrossShardRejected(t *testing.T) {
 	err := dbhelper.Transaction(ctx, func(tx *dbhelper.Tx) error {
 		txOrderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithTx(tx))
 		return txOrderExec.Create(ctx, &Order{ShopID: 12344, Amount: time.Now().UnixNano()})
-	}, dbhelper.WithManager(mgr), dbhelper.WithTxDatabaseGroupKey("order_dbs"), dbhelper.WithTxShardingKey(txKey))
+	}, dbhelper.WithManager(mgr), dbhelper.WithTransactionDatabaseGroupKey("order_dbs"), dbhelper.WithTransactionShardingKey(txKey))
 	requireErrorContains(t, err, "cross-shard")
 }
 

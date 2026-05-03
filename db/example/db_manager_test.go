@@ -129,7 +129,7 @@ func Test_Manager_ShardedWithReuse(t *testing.T) {
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
 				MaxConcurrency: 5,
-				TableRules: []dbspi.TableRule{
+				TableRules: []dbspi.TableShardingRuleConfig{
 					{
 						Tables: []string{"order_detail_tab"},
 						TableSharding: &dbspi.TableShardingConfig{

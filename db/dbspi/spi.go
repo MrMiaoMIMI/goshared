@@ -80,7 +80,7 @@ type Executor[T Entity] interface {
 	Shard(key *ShardingKey) (Executor[T], error)
 
 	// Helpful Methods
-	// If T implements IdFieldNamer, xxById methods get id field name from IdFieldName(),
+	// If T implements IdFieldNameProvider, xxById methods get id field name from IdFieldName(),
 	// otherwise use DefaultIdFieldName as the id field name
 	GetById(ctx context.Context, id any) (T, error)
 	ExistsById(ctx context.Context, id any) (bool, T, error)

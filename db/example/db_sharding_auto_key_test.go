@@ -667,7 +667,7 @@ func Test_TableVar_TableRuleInheritNameExpr(t *testing.T) {
 					NameExpr:    "${table}_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
-				TableRules: []dbspi.TableRule{
+				TableRules: []dbspi.TableShardingRuleConfig{
 					{
 						Tables: []string{"order_detail_tab"},
 						TableSharding: &dbspi.TableShardingConfig{

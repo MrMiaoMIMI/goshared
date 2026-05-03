@@ -62,16 +62,16 @@ type TableShardingRule interface {
 	ResolveTable(logicalTable string, key *ShardingKey) (string, error)
 }
 
-// ShardCounter is an optional interface that table sharding rules can
+// TableShardCounter is an optional interface that table sharding rules can
 // implement to declare the total number of shards. Used by FindAll /
 // CountAll to enumerate all physical tables.
-type ShardCounter interface {
+type TableShardCounter interface {
 	ShardCount() int
 }
 
-// ShardEnumerator generates the physical table name for a given shard index.
+// TableShardEnumerator generates the physical table name for a given shard index.
 // Used by scatter-gather (FindAll/CountAll) to enumerate all physical tables.
-type ShardEnumerator interface {
+type TableShardEnumerator interface {
 	ShardName(logicalTable string, index int) (string, error)
 }
 

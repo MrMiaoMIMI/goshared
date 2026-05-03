@@ -4,7 +4,7 @@ import "github.com/MrMiaoMIMI/goshared/db/dbspi"
 
 // WithManager makes NewExecutor/NewEnhancedExecutor/Transaction use the given
 // Manager instead of the global default manager.
-func WithManager(mgr dbspi.Manager) UseManagerOption {
+func WithManager(mgr dbspi.Manager) ManagerSelectionOption {
 	return managerSelectionOption{manager: mgr}
 }
 

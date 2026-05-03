@@ -2,19 +2,19 @@ package dbhelper
 
 import "github.com/MrMiaoMIMI/goshared/db/dbspi"
 
-// WithTxDatabaseGroupKey selects the database group used by a transaction.
+// WithTransactionDatabaseGroupKey selects the database group used by a transaction.
 //
 // If omitted, Transaction uses dbspi.DefaultDatabaseGroupKey.
-func WithTxDatabaseGroupKey(databaseGroupKey string) TransactionOption {
+func WithTransactionDatabaseGroupKey(databaseGroupKey string) TransactionOption {
 	return transactionOptionFunc(func(o *transactionOptions) {
 		o.databaseGroupKey = databaseGroupKey
 	})
 }
 
-// WithTxShardingKey selects the physical database shard used by a transaction.
+// WithTransactionShardingKey selects the physical database shard used by a transaction.
 //
 // It is required when the selected database group has database-level sharding.
-func WithTxShardingKey(key *dbspi.ShardingKey) TransactionOption {
+func WithTransactionShardingKey(key *dbspi.ShardingKey) TransactionOption {
 	return transactionOptionFunc(func(o *transactionOptions) {
 		o.shardingKey = key
 	})

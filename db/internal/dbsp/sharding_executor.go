@@ -13,11 +13,11 @@ import (
 
 // ShardedExecutorConfig is the internal config for creating a sharded executor.
 type ShardedExecutorConfig struct {
-	Dbs            []DatabaseTarget
-	DbRule         dbspi.DatabaseShardingRule
-	TableRule      dbspi.TableShardingRule
-	MaxConcurrency int
-	CommonFields   dbspi.CommonFieldAutoFillOptions
+	Dbs               []DatabaseTarget
+	DbRule            dbspi.DatabaseShardingRule
+	TableShardingRule dbspi.TableShardingRule
+	MaxConcurrency    int
+	CommonFields      dbspi.CommonFieldAutoFillOptions
 }
 
 // shardingKeyResolver auto-extracts sharding key column values from CRUD parameters.
@@ -25,7 +25,7 @@ type ShardedExecutorConfig struct {
 type shardingKeyResolver struct {
 	requiredCols []string       // union of db rule + table rule required columns
 	fieldMap     map[string]int // gorm column name -> struct field index
-	idColumnName string         // from IdFieldNamer or DefaultIdFieldName
+	idColumnName string         // from IdFieldNameProvider or DefaultIdFieldName
 }
 
 // buildShardingKeyResolver creates a resolver from the sharding rules and entity type.
@@ -324,23 +324,23 @@ func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *sh
 	if len(cfg.Dbs) == 0 {
 		panic("sharded executor requires at least one DatabaseTarget via WithDbs")
 	}
-	if cfg.TableRule == nil && cfg.DbRule == nil {
+	if cfg.TableShardingRule == nil && cfg.DbRule == nil {
 		panic("sharded executor requires at least one of WithTableRule or WithDbRule")
 	}
 
 	idColumnName := dbspi.DefaultIdFieldName
-	if namer, ok := any(entity).(dbspi.IdFieldNamer); ok {
+	if namer, ok := any(entity).(dbspi.IdFieldNameProvider); ok {
 		idColumnName = namer.IdFieldName()
 	}
 
 	entityType := reflect.TypeOf(entity)
-	resolver := buildShardingKeyResolver(entityType, idColumnName, cfg.DbRule, cfg.TableRule)
+	resolver := buildShardingKeyResolver(entityType, idColumnName, cfg.DbRule, cfg.TableShardingRule)
 
 	return &shardedExecutor[T]{
 		entity:         entity,
 		dbs:            cfg.Dbs,
 		dbRule:         cfg.DbRule,
-		tableRule:      cfg.TableRule,
+		tableRule:      cfg.TableShardingRule,
 		maxConcurrency: cfg.MaxConcurrency,
 		keyResolver:    resolver,
 		commonFields:   cfg.CommonFields,
@@ -806,16 +806,16 @@ func (e *shardedExecutor[T]) allShardTargets() ([]shardTarget, error) {
 
 	tableCount := 0
 	if e.tableRule != nil {
-		if counter, ok := e.tableRule.(dbspi.ShardCounter); ok {
+		if counter, ok := e.tableRule.(dbspi.TableShardCounter); ok {
 			tableCount = counter.ShardCount()
 		}
 	}
 
 	for _, dt := range e.dbs {
 		if tableCount > 0 {
-			enumerator, ok := e.tableRule.(dbspi.ShardEnumerator)
+			enumerator, ok := e.tableRule.(dbspi.TableShardEnumerator)
 			if !ok {
-				return nil, fmt.Errorf("table rule implements ShardCounter but not ShardEnumerator")
+				return nil, fmt.Errorf("table rule implements TableShardCounter but not TableShardEnumerator")
 			}
 			for i := 0; i < tableCount; i++ {
 				tableName, err := enumerator.ShardName(logicalTable, i)
@@ -920,7 +920,7 @@ func (e *shardedExecutor[T]) fetchAllFromShard(ctx context.Context, exec dbspi.E
 
 // getIdFieldName returns the ID field name from the entity.
 func (e *shardedExecutor[T]) getIdFieldName() string {
-	if namer, ok := any(e.entity).(dbspi.IdFieldNamer); ok {
+	if namer, ok := any(e.entity).(dbspi.IdFieldNameProvider); ok {
 		return namer.IdFieldName()
 	}
 	return dbspi.DefaultIdFieldName

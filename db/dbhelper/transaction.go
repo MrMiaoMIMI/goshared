@@ -21,8 +21,8 @@ type Tx struct {
 // Transaction runs fn in a single physical database transaction.
 //
 // The transaction is committed if fn returns nil and rolled back otherwise.
-// Use WithTxDatabaseGroupKey to select the database group. For db-sharded groups,
-// WithTxShardingKey is required to select one physical database shard. Local
+// Use WithTransactionDatabaseGroupKey to select the database group. For db-sharded groups,
+// WithTransactionShardingKey is required to select one physical database shard. Local
 // transactions do not span multiple database groups or database shards.
 // Inside fn, create one or more table executors with NewExecutor or
 // NewEnhancedExecutor plus WithTx(tx).

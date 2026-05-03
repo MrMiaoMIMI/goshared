@@ -126,8 +126,8 @@ func copyContextVars(src, dst *expr.EvalContext) {
 
 var (
 	_ dbspi.TableShardingRule          = (*exprTableRule)(nil)
-	_ dbspi.ShardCounter               = (*exprTableRule)(nil)
-	_ dbspi.ShardEnumerator            = (*exprTableRule)(nil)
+	_ dbspi.TableShardCounter          = (*exprTableRule)(nil)
+	_ dbspi.TableShardEnumerator       = (*exprTableRule)(nil)
 	_ dbspi.ShardingKeyColumnsProvider = (*exprTableRule)(nil)
 )
 

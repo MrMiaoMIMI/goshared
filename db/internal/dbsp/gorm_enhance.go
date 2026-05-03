@@ -63,11 +63,11 @@ func (e *GormExecutor[T]) ExistsNotDeleted(ctx context.Context, query dbspi.Quer
 }
 
 // getDeletedField returns the deleted field from the entity instance.
-// If the entity instance implements SoftDeleteFieldNamer interface, it returns the deleted field name from the interface.
+// If the entity instance implements SoftDeleteFieldNameProvider interface, it returns the deleted field name from the interface.
 // Otherwise, it returns the default deleted field name.
 func (e *GormExecutor[T]) getDeletedField(entity dbspi.Entity) dbspi.Field[bool] {
-	if namer, ok := entity.(dbspi.SoftDeleteFieldNamer); ok {
-		return NewField[bool](namer.DeletedFieldName())
+	if namer, ok := entity.(dbspi.SoftDeleteFieldNameProvider); ok {
+		return NewField[bool](namer.SoftDeleteFieldName())
 	}
 	return NewDefaultDeletedFiled()
 }
