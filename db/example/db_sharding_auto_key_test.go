@@ -17,9 +17,9 @@ type RegionalOrder struct {
 	Amount int64  `gorm:"column:amount"`
 }
 
-func (*RegionalOrder) TableName() string   { return "order_tab" }
-func (*RegionalOrder) DbKey() string       { return "order_dbs" }
-func (*RegionalOrder) IdFieldName() string { return dbspi.DefaultIdFieldName }
+func (*RegionalOrder) TableName() string        { return "order_tab" }
+func (*RegionalOrder) DatabaseGroupKey() string { return "order_dbs" }
+func (*RegionalOrder) IdFieldName() string      { return dbspi.DefaultIdFieldName }
 
 // ==================== Auto-extract from Entity ====================
 
@@ -560,22 +560,22 @@ func Test_AutoKey_NilQuery_MissingColumn(t *testing.T) {
 	t.Logf("Nil query missing column: %v", err)
 }
 
-// ==================== DbManager + auto-extract ====================
+// ==================== Manager + auto-extract ====================
 
-func Test_AutoKey_DbManager_CreateWithoutExplicitKey(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: {
+func Test_AutoKey_Manager_CreateWithoutExplicitKey(t *testing.T) {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword, Debug: true,
-				DbName: testAppDbName,
+				DatabaseName: testAppDatabaseName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword, Debug: true,
-				DbSharding: &dbspi.DbShardConfig{
+				DatabaseSharding: &dbspi.DatabaseShardingConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
-				TableSharding: &dbspi.TableShardConfig{
+				TableSharding: &dbspi.TableShardingConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
@@ -583,27 +583,27 @@ func Test_AutoKey_DbManager_CreateWithoutExplicitKey(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
+	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
 	err := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 	requireNoError(t, err)
 }
 
-func Test_AutoKey_DbManager_FindWithQuery(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: {
+func Test_AutoKey_Manager_FindWithQuery(t *testing.T) {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbName: testAppDbName,
+				DatabaseName: testAppDatabaseName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbSharding: &dbspi.DbShardConfig{
+				DatabaseSharding: &dbspi.DatabaseShardingConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
-				TableSharding: &dbspi.TableShardConfig{
+				TableSharding: &dbspi.TableShardingConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
@@ -611,14 +611,14 @@ func Test_AutoKey_DbManager_FindWithQuery(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
+	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
 	shopId := int64(12345)
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	orders, err := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 	requireNoError(t, err)
-	t.Logf("DbManager Find with query auto-extract: orders=%v", orders)
+	t.Logf("Manager Find with query auto-extract: orders=%v", orders)
 }
 
 // ==================== ${table} Variable Tests ====================
@@ -638,9 +638,9 @@ type OrderDetailTab struct {
 	Detail string
 }
 
-func (*OrderDetailTab) TableName() string   { return "order_detail_tab" }
-func (*OrderDetailTab) DbKey() string       { return "order_dbs" }
-func (*OrderDetailTab) IdFieldName() string { return dbspi.DefaultIdFieldName }
+func (*OrderDetailTab) TableName() string        { return "order_detail_tab" }
+func (*OrderDetailTab) DatabaseGroupKey() string { return "order_dbs" }
+func (*OrderDetailTab) IdFieldName() string      { return dbspi.DefaultIdFieldName }
 
 func Test_TableVar_DifferentEntitiesSameRule(t *testing.T) {
 	orderExec := newTableVarExecutor(&Order{}, 10)
@@ -653,24 +653,24 @@ func Test_TableVar_DifferentEntitiesSameRule(t *testing.T) {
 	requireNoError(t, err2)
 }
 
-func Test_TableVar_EntityRuleInheritNameExpr(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: {
+func Test_TableVar_TableRuleInheritNameExpr(t *testing.T) {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbName: testAppDbName,
+				DatabaseName: testAppDatabaseName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbName: testDbName,
-				TableSharding: &dbspi.TableShardConfig{
+				DatabaseName: testDatabaseName,
+				TableSharding: &dbspi.TableShardingConfig{
 					NameExpr:    "${table}_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
-				EntityRules: []dbspi.EntityRule{
+				TableRules: []dbspi.TableRule{
 					{
 						Tables: []string{"order_detail_tab"},
-						TableSharding: &dbspi.TableShardConfig{
+						TableSharding: &dbspi.TableShardingConfig{
 							ExpandExprs: []string{"${idx} := range(0, 20)", "${idx} = @{shop_id} % 20", "${index} = fill(${idx}, 8)"},
 						},
 					},
@@ -679,8 +679,8 @@ func Test_TableVar_EntityRuleInheritNameExpr(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
-	detailExec := dbhelper.For(&OrderDetailTab{}, dbhelper.WithDbManager(mgr))
+	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
+	detailExec := dbhelper.NewExecutor(&OrderDetailTab{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
 	err1 := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})

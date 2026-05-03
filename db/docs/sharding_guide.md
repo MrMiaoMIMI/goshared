@@ -3,8 +3,8 @@
 本指南以 **YAML 配置驱动** 的方式，从零搭建分库分表服务。核心流程：
 
 1. 编写 YAML 配置（`DatabaseConfig`）
-2. 初始化 `DbManager`
-3. 通过 `For(&Entity{})` 获取 Executor
+2. 初始化 `Manager`
+3. 通过 `NewExecutor(&Entity{})` 获取 Executor
 4. CRUD 时自动/手动/混合提供 ShardingKey
 
 ---
@@ -21,7 +21,7 @@
   - [2.6 混合配置：多库组](#26-混合配置多库组)
   - [2.7 多服务器分库](#27-多服务器分库)
   - [2.8 连接池配置](#28-连接池配置)
-- [3. 初始化 DbManager](#3-初始化-dbmanager)
+- [3. 初始化 Manager](#3-初始化-manager)
 - [4. ShardingKey 三种模式](#4-shardingkey-三种模式)
   - [4.1 Auto 模式：从 CRUD 参数自动提取](#41-auto-模式从-crud-参数自动提取)
   - [4.2 Manual 模式：手动设置 ShardingKey](#42-manual-模式手动设置-shardingkey)
@@ -42,10 +42,10 @@
 
 ## 1. Entity 定义
 
-每个 Entity 需要实现 `TableName()` 接口。分片 Entity 还需通过 `DbKey()` 声明所属数据库组。
+每个 Entity 需要实现 `TableName()` 接口。分片 Entity 还需通过 `DatabaseGroupKey()` 声明所属数据库组。
 
 ```go
-// 非分片 Entity — 使用 dbspi.DefaultDbKey 数据库
+// 非分片 Entity — 使用 dbspi.DefaultDatabaseGroupKey 数据库
 type User struct {
     ID   int64  `gorm:"primaryKey"`
     Name string `gorm:"column:name"`
@@ -62,7 +62,7 @@ type Order struct {
 }
 
 func (*Order) TableName() string   { return "order_tab" }
-func (*Order) DbKey() string       { return "order_dbs" }
+func (*Order) DatabaseGroupKey() string       { return "order_dbs" }
 func (*Order) IdFieldName() string { return dbspi.DefaultIdFieldName }
 ```
 
@@ -71,7 +71,7 @@ func (*Order) IdFieldName() string { return dbspi.DefaultIdFieldName }
 | 接口 | 必须 | 说明 |
 |------|------|------|
 | `TableName() string` | 是 | 逻辑表名 |
-| `DbKey() string` | 否 | 所属库组 key（不实现则走 `dbspi.DefaultDbKey`） |
+| `DatabaseGroupKey() string` | 否 | 所属库组 key（不实现则走 `dbspi.DefaultDatabaseGroupKey`） |
 | `IdFieldName() string` | 否 | ID 列名（用于 `GetById`/`UpdateById` 等方法） |
 
 **Auto ShardingKey 对 Entity 的要求**：Entity 的 struct field 上必须有 `gorm:"column:xxx"` tag 与配置中的 `@{xxx}` 列名对应，否则 auto 提取无法从 Entity 中读取分片字段值。
@@ -80,18 +80,18 @@ func (*Order) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 ## 2. YAML 配置
 
-所有配置以 `databases` 为根节点，每个 key 是一个数据库组名称。分片规则使用 **表达式语法**（`name_expr` + `expand_exprs`）描述。
+所有配置以 `database_groups` 为根节点，每个 key 是一个数据库组名称。分片规则使用 **表达式语法**（`name_expr` + `expand_exprs`）描述。
 
 ### 2.1 非分片单库
 
 ```yaml
-databases:
+database_groups:
   default:
     host: 10.0.0.1
     port: 3306
     user: root
     password: secret
-    db_name: my_app_db
+    database_name: my_app_db
 ```
 
 ### 2.2 单库分表
@@ -99,13 +99,13 @@ databases:
 按 `shop_id` 取模分 10 张表：
 
 ```yaml
-databases:
+database_groups:
   order_dbs:
     host: 10.0.0.1
     port: 3306
     user: root
     password: secret
-    db_name: order_db
+    database_name: order_db
     table_sharding:
       name_expr: "order_tab_${index}"
       expand_exprs:
@@ -123,13 +123,13 @@ databases:
 4 个库，每库 10 张表：
 
 ```yaml
-databases:
+database_groups:
   order_dbs:
     host: 10.0.0.1
     port: 3306
     user: root
     password: secret
-    db_sharding:
+    database_sharding:
       name_expr: "order_db_${idx}"
       expand_exprs:
         - "${idx} := range(0, 4)"
@@ -142,20 +142,20 @@ databases:
         - "${index} = fill(${idx}, 8)"
 ```
 
-> **注意**：使用 `db_sharding` 时不要填 `db_name`（库名由表达式自动生成）。
+> **注意**：使用 `database_sharding` 时不要填 `database_name`（库名由表达式自动生成）。
 
 ### 2.4 复合分片键（不同列路由库和表）
 
 DB 按 `region` 枚举分，Table 按 `shop_id` 取模分：
 
 ```yaml
-databases:
+database_groups:
   order_dbs:
     host: 10.0.0.1
     port: 3306
     user: root
     password: secret
-    db_sharding:
+    database_sharding:
       name_expr: "order_${region}_db"
       expand_exprs:
         - "${region} := enum(SG, TH, ID)"
@@ -180,13 +180,13 @@ databases:
 这使得一套 `name_expr` 可以复用于多个 Entity：
 
 ```yaml
-databases:
+database_groups:
   order_dbs:
     host: 10.0.0.1
     port: 3306
     user: root
     password: secret
-    db_sharding:
+    database_sharding:
       name_expr: "order_db_${idx}"
       expand_exprs:
         - "${idx} := range(0, 4)"
@@ -199,7 +199,7 @@ databases:
         - "${idx} := range(0, 10)"
         - "${idx} = @{shop_id} % 10"
         - "${index} = fill(${idx}, 8)"
-    entity_rules:
+    table_rules:
       - tables: ["order_detail_tab"]
         table_sharding:
           # name_expr 为空时自动继承全局的 "${table}_${index}"
@@ -212,15 +212,15 @@ databases:
 
 **规则：**
 - `${table}` 在 `ResolveTable` 和 `ShardName` 时自动绑定为 `entity.TableName()`
-- entity_rules 中的 `name_expr` 如果省略（空字符串），自动继承全局 `table_sharding.name_expr`
-- 如果需要完全不同的命名模式，可以在 entity_rules 中显式指定 `name_expr`
+- table_rules 中的 `name_expr` 如果省略（空字符串），自动继承全局 `table_sharding.name_expr`
+- 如果需要完全不同的命名模式，可以在 table_rules 中显式指定 `name_expr`
 
 #### 不使用 `${table}` 的传统写法
 
 如果不同 Entity 需要完全不同的命名模式，也可以显式指定 `name_expr`：
 
 ```yaml
-    entity_rules:
+    table_rules:
       - tables: ["order_detail_tab"]
         table_sharding:
           name_expr: "order_detail_tab_${index}"
@@ -233,14 +233,14 @@ databases:
 ### 2.6 混合配置：多库组
 
 ```yaml
-databases:
+database_groups:
   # 非分片库
   default:
     host: 10.0.0.1
     port: 3306
     user: root
     password: secret
-    db_name: my_app_db
+    database_name: my_app_db
 
   # 分库分表
   order_dbs:
@@ -248,7 +248,7 @@ databases:
     port: 3306
     user: root
     password: secret
-    db_sharding:
+    database_sharding:
       name_expr: "order_db_${idx}"
       expand_exprs:
         - "${idx} := range(0, 4)"
@@ -265,7 +265,7 @@ databases:
 ### 2.7 多服务器分库
 
 ```yaml
-databases:
+database_groups:
   order_dbs:
     servers:
       - key: "0"
@@ -273,14 +273,14 @@ databases:
         port: 3306
         user: root
         password: secret
-        db_name: order_db_0
+        database_name: order_db_0
       - key: "1"
         host: 10.0.0.2
         port: 3306
         user: root
         password: secret
-        db_name: order_db_1
-    db_sharding:
+        database_name: order_db_1
+    database_sharding:
       name_expr: "${idx}"
       expand_exprs:
         - "${idx} := range(0, 2)"
@@ -293,18 +293,18 @@ databases:
         - "${index} = fill(${idx}, 8)"
 ```
 
-> `servers[].key` 必须与 `db_sharding.name_expr` 的计算结果匹配。
+> `servers[].key` 必须与 `database_sharding.name_expr` 的计算结果匹配。
 
 ### 2.8 连接池配置
 
 ```yaml
-databases:
+database_groups:
   order_dbs:
     host: 10.0.0.1
     port: 3306
     user: root
     password: secret
-    db_name: order_db
+    database_name: order_db
     max_open_conns: 200
     max_idle_conns: 20
     conn_max_lifetime_seconds: 1800
@@ -319,7 +319,7 @@ databases:
 
 ---
 
-## 3. 初始化 DbManager
+## 3. 初始化 Manager
 
 ```go
 import (
@@ -332,12 +332,12 @@ import (
 var cfg dbspi.DatabaseConfig
 yaml.Unmarshal(configBytes, &cfg)
 
-// 创建 DbManager
-mgr := dbhelper.NewDbManager(cfg)
+// 创建 Manager
+mgr := dbhelper.NewManager(cfg)
 
 // 获取 Executor
-userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))     // → dbspi.DefaultDbKey 库
-orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))   // → "order_dbs" 库组（根据 DbKey()）
+userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))     // → dbspi.DefaultDatabaseGroupKey 库
+orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))   // → "order_dbs" 库组（根据 DatabaseGroupKey()）
 ```
 
 ---
@@ -409,7 +409,7 @@ result, err := orderExec.FirstOrCreate(ctx,
 #### 通过 Context 注入
 
 ```go
-sk := dbspi.NewShardingKey().SetVal("shop_id", int64(12345))
+sk := dbspi.NewShardingKey().SetValue("shop_id", int64(12345))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 orders, err := orderExec.Find(ctx, nil, nil)
@@ -420,7 +420,7 @@ orders, err := orderExec.Find(ctx, nil, nil)
 #### 通过 Shard() 方法
 
 ```go
-sk := dbspi.NewShardingKey().SetVal("shop_id", int64(12345))
+sk := dbspi.NewShardingKey().SetValue("shop_id", int64(12345))
 shardExec, err := orderExec.Shard(sk)
 
 // 在同一分片上执行多次操作
@@ -435,7 +435,7 @@ orders, _ := shardExec.Find(ctx, query, nil)
 Raw SQL 和 Exec 无法自动提取分片键，必须手动设置：
 
 ```go
-sk := dbspi.NewShardingKey().SetVal("shop_id", int64(12345))
+sk := dbspi.NewShardingKey().SetValue("shop_id", int64(12345))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 rows, err := orderExec.Raw(ctx, "SELECT * FROM order_tab WHERE amount > ?", 100)
@@ -447,7 +447,7 @@ rows, err := orderExec.Raw(ctx, "SELECT * FROM order_tab WHERE amount > ?", 100)
 
 ```go
 // 手动设置 shop_id=12345
-sk := dbspi.NewShardingKey().SetVal("shop_id", int64(12345))
+sk := dbspi.NewShardingKey().SetValue("shop_id", int64(12345))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 shopId := int64(12345)
@@ -461,7 +461,7 @@ orders, err := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 
 ```go
 // 手动：shop_id=99999 (99999 % 10 = 9)
-sk := dbspi.NewShardingKey().SetVal("shop_id", int64(99999))
+sk := dbspi.NewShardingKey().SetValue("shop_id", int64(99999))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 // 自动：entity shop_id=12345 (12345 % 10 = 5)
@@ -473,7 +473,7 @@ err := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 
 ```go
 // 手动：shop_id=22345 (22345 % 10 = 5)
-sk := dbspi.NewShardingKey().SetVal("shop_id", int64(22345))
+sk := dbspi.NewShardingKey().SetValue("shop_id", int64(22345))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 // 自动：entity shop_id=12345 (12345 % 10 = 5) → 同一张表
@@ -569,7 +569,7 @@ result, err := orderExec.FirstOrCreate(ctx,
 
 ```go
 // 手动：shop_id=22345 (% 10 = 5)
-sk := dbspi.NewShardingKey().SetVal("shop_id", int64(22345))
+sk := dbspi.NewShardingKey().SetValue("shop_id", int64(22345))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 shopId := int64(12345) // % 10 = 5 → 同表
@@ -614,7 +614,7 @@ totalCount, err := orderExec.CountAll(ctx, query)
 `max_concurrency` 控制并发 goroutine 数，推荐对大分片数场景设置合理值：
 
 ```yaml
-databases:
+database_groups:
   order_dbs:
     max_concurrency: 10
     # ...
@@ -685,7 +685,7 @@ table_sharding:
     - "${index} = fill(${idx}, 8)"
 ```
 
-配合 entity_rules 的 `name_expr` 继承：如果 entity_rule 中不指定 `name_expr`，自动继承全局 `table_sharding.name_expr`，仅需覆写 `expand_exprs`。
+配合 table_rules 的 `name_expr` 继承：如果 table_rule 中不指定 `name_expr`，自动继承全局 `table_sharding.name_expr`，仅需覆写 `expand_exprs`。
 
 ---
 
@@ -694,13 +694,13 @@ table_sharding:
 ### config.yaml
 
 ```yaml
-databases:
+database_groups:
   default:
     host: 10.0.0.1
     port: 3306
     user: root
     password: secret
-    db_name: my_app_db
+    database_name: my_app_db
 
   order_dbs:
     host: 10.0.0.1
@@ -710,7 +710,7 @@ databases:
     max_open_conns: 200
     max_idle_conns: 20
     max_concurrency: 10
-    db_sharding:
+    database_sharding:
       name_expr: "order_db_${idx}"
       expand_exprs:
         - "${idx} := range(0, 4)"
@@ -751,7 +751,7 @@ type Order struct {
     Amount int64 `gorm:"column:amount"`
 }
 func (*Order) TableName() string   { return "order_tab" }
-func (*Order) DbKey() string       { return "order_dbs" }
+func (*Order) DatabaseGroupKey() string       { return "order_dbs" }
 func (*Order) IdFieldName() string { return dbspi.DefaultIdFieldName }
 
 func main() {
@@ -760,12 +760,12 @@ func main() {
     var cfg dbspi.DatabaseConfig
     yaml.Unmarshal(data, &cfg)
 
-    // 2. 初始化 DbManager
-    mgr := dbhelper.NewDbManager(cfg)
+    // 2. 初始化 Manager
+    mgr := dbhelper.NewManager(cfg)
 
     // 3. 获取 Executor
-    userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))
-    orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
+    userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
+    orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
     shopIdField := dbhelper.NewField[int64]("shop_id")
 
     ctx := context.Background()
@@ -783,14 +783,14 @@ func main() {
     fmt.Printf("Orders: %d\n", len(orders))
 
     // ===== Manual 模式：手动设置 =====
-    sk := dbspi.NewShardingKey().SetVal("shop_id", int64(12345))
+    sk := dbspi.NewShardingKey().SetValue("shop_id", int64(12345))
     manualCtx := dbspi.WithShardingKey(ctx, sk)
     orders, _ = orderExec.Find(manualCtx, nil, nil)
 
     // ===== Mix 模式：手动 + 自动聚合校验 =====
     // 手动 key 和 query 都指向 shop_id % 10 = 5 → OK
     mixCtx := dbspi.WithShardingKey(ctx,
-        dbspi.NewShardingKey().SetVal("shop_id", int64(22345)))
+        dbspi.NewShardingKey().SetValue("shop_id", int64(22345)))
     orders, _ = orderExec.Find(mixCtx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 
     // ===== Scatter-Gather =====
@@ -860,13 +860,13 @@ executor.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId), amountField.Gt(&minAmount
 // → OK: shop_id 通过 Eq 确定分片，amount 的 Gt 仅作为过滤条件
 ```
 
-### DSN 与 db_sharding 不兼容
+### DSN 与 database_sharding 不兼容
 
-单服务器场景下，`dsn` 不能与 `db_sharding` 同时使用（DSN 中包含数据库名，无法动态切换）。分库场景请使用 host/port/user/password 字段或 `servers` 列表。
+单服务器场景下，`dsn` 不能与 `database_sharding` 同时使用（DSN 中包含数据库名，无法动态切换）。分库场景请使用 host/port/user/password 字段或 `servers` 列表。
 
-### db_sharding 时不要填 db_name
+### database_sharding 时不要填 database_name
 
-使用 `db_sharding` 时，库名由表达式自动生成，`db_name` 字段无意义。
+使用 `database_sharding` 时，库名由表达式自动生成，`database_name` 字段无意义。
 
 ### Entity gorm tag 要求
 

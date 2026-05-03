@@ -21,16 +21,16 @@ func (*commonFieldTestEntity) TableName() string {
 	return "common_field_test_tab"
 }
 
-func testCommonFieldOptions() dbspi.CommonFieldOptions {
-	return dbspi.CommonFieldOptions{
-		Enabled:          true,
+func testCommonFieldAutoFillOptions() dbspi.CommonFieldAutoFillOptions {
+	return dbspi.CommonFieldAutoFillOptions{
+		AutoFillEnabled:  true,
 		TimeProvider:     func() uint64 { return 12345 },
 		OperatorProvider: dbspi.OperatorFromContext,
 	}
 }
 
-func TestDefaultCommonFieldOptionsEnableAutofill(t *testing.T) {
-	opts := dbspi.DefaultCommonFieldOptions()
+func TestDefaultCommonFieldAutoFillOptionsEnableAutofill(t *testing.T) {
+	opts := dbspi.DefaultCommonFieldAutoFillOptions()
 	opts.TimeProvider = func() uint64 { return 12345 }
 	entity := &commonFieldTimeOnlyTestEntity{}
 
@@ -41,10 +41,10 @@ func TestDefaultCommonFieldOptionsEnableAutofill(t *testing.T) {
 	}
 }
 
-func TestDisabledCommonFieldOptionsSkipAutofill(t *testing.T) {
+func TestDisabledCommonFieldAutoFillOptionsSkipAutofill(t *testing.T) {
 	entity := &commonFieldTimeOnlyTestEntity{}
 
-	applyCreateCommonFields(context.Background(), dbspi.DisabledCommonFieldOptions(), entity)
+	applyCreateCommonFields(context.Background(), dbspi.DisabledCommonFieldAutoFillOptions(), entity)
 
 	if entity.Ctime != 0 || entity.Mtime != 0 {
 		t.Fatalf("disabled common field options should skip autofill: %+v", entity.TimeDo)
@@ -55,7 +55,7 @@ func TestApplyCreateCommonFields(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "creator_a")
 	entity := &commonFieldTestEntity{}
 
-	applyCreateCommonFields(ctx, testCommonFieldOptions(), entity)
+	applyCreateCommonFields(ctx, testCommonFieldAutoFillOptions(), entity)
 
 	if entity.Ctime != 12345 {
 		t.Fatalf("Ctime = %d, want 12345", entity.Ctime)
@@ -88,18 +88,22 @@ func TestApplyCreateCommonFieldsDoesNotOverwriteExplicitValuesByDefault(t *testi
 	ctx := dbspi.WithOperator(context.Background(), "creator_a")
 	entity := &commonFieldTestEntity{
 		CommonDo: dbspi.CommonDo{
-			TimeDo: dbspi.TimeDo{
+			CreateTimeDo: dbspi.CreateTimeDo{
 				Ctime: 1,
+			},
+			UpdateTimeDo: dbspi.UpdateTimeDo{
 				Mtime: 2,
 			},
-			OperatorDo: dbspi.OperatorDo{
+			CreatorDo: dbspi.CreatorDo{
 				Creator: "creator_existing",
+			},
+			UpdaterDo: dbspi.UpdaterDo{
 				Updater: "updater_existing",
 			},
 		},
 	}
 
-	applyCreateCommonFields(ctx, testCommonFieldOptions(), entity)
+	applyCreateCommonFields(ctx, testCommonFieldAutoFillOptions(), entity)
 
 	if entity.Ctime != 1 || entity.Mtime != 2 || entity.Creator != "creator_existing" || entity.Updater != "updater_existing" {
 		t.Fatalf("create common fields should not overwrite explicit values: %+v", entity.CommonDo)
@@ -108,16 +112,20 @@ func TestApplyCreateCommonFieldsDoesNotOverwriteExplicitValuesByDefault(t *testi
 
 func TestApplyCreateCommonFieldsCanOverwriteExplicitValues(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "creator_a")
-	opts := testCommonFieldOptions()
+	opts := testCommonFieldAutoFillOptions()
 	opts.OverwriteExplicitValues = true
 	entity := &commonFieldTestEntity{
 		CommonDo: dbspi.CommonDo{
-			TimeDo: dbspi.TimeDo{
+			CreateTimeDo: dbspi.CreateTimeDo{
 				Ctime: 1,
+			},
+			UpdateTimeDo: dbspi.UpdateTimeDo{
 				Mtime: 2,
 			},
-			OperatorDo: dbspi.OperatorDo{
+			CreatorDo: dbspi.CreatorDo{
 				Creator: "creator_existing",
+			},
+			UpdaterDo: dbspi.UpdaterDo{
 				Updater: "updater_existing",
 			},
 		},
@@ -134,18 +142,22 @@ func TestApplySaveCommonFieldsDoesNotOverwriteExplicitValuesByDefault(t *testing
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
 	entity := &commonFieldTestEntity{
 		CommonDo: dbspi.CommonDo{
-			TimeDo: dbspi.TimeDo{
+			CreateTimeDo: dbspi.CreateTimeDo{
 				Ctime: 1,
+			},
+			UpdateTimeDo: dbspi.UpdateTimeDo{
 				Mtime: 2,
 			},
-			OperatorDo: dbspi.OperatorDo{
+			CreatorDo: dbspi.CreatorDo{
 				Creator: "creator_existing",
+			},
+			UpdaterDo: dbspi.UpdaterDo{
 				Updater: "updater_existing",
 			},
 		},
 	}
 
-	applySaveCommonFields(ctx, testCommonFieldOptions(), entity)
+	applySaveCommonFields(ctx, testCommonFieldAutoFillOptions(), entity)
 
 	if entity.Ctime != 1 {
 		t.Fatalf("Ctime = %d, want unchanged 1", entity.Ctime)
@@ -165,7 +177,7 @@ func TestApplySaveCommonFieldsFillsMissingMutableFields(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
 	entity := &commonFieldTestEntity{}
 
-	applySaveCommonFields(ctx, testCommonFieldOptions(), entity)
+	applySaveCommonFields(ctx, testCommonFieldAutoFillOptions(), entity)
 
 	if entity.Ctime != 12345 {
 		t.Fatalf("Ctime = %d, want 12345", entity.Ctime)
@@ -183,16 +195,20 @@ func TestApplySaveCommonFieldsFillsMissingMutableFields(t *testing.T) {
 
 func TestApplySaveCommonFieldsCanOverwriteExplicitValues(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
-	opts := testCommonFieldOptions()
+	opts := testCommonFieldAutoFillOptions()
 	opts.OverwriteExplicitValues = true
 	entity := &commonFieldTestEntity{
 		CommonDo: dbspi.CommonDo{
-			TimeDo: dbspi.TimeDo{
+			CreateTimeDo: dbspi.CreateTimeDo{
 				Ctime: 1,
+			},
+			UpdateTimeDo: dbspi.UpdateTimeDo{
 				Mtime: 2,
 			},
-			OperatorDo: dbspi.OperatorDo{
+			CreatorDo: dbspi.CreatorDo{
 				Creator: "creator_existing",
+			},
+			UpdaterDo: dbspi.UpdaterDo{
 				Updater: "updater_existing",
 			},
 		},
@@ -209,16 +225,16 @@ func TestApplyUpdateCommonFieldsDoesNotOverwriteExplicitValuesByDefault(t *testi
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
 	entity := &commonFieldTestEntity{
 		CommonDo: dbspi.CommonDo{
-			TimeDo: dbspi.TimeDo{
+			UpdateTimeDo: dbspi.UpdateTimeDo{
 				Mtime: 2,
 			},
-			OperatorDo: dbspi.OperatorDo{
+			UpdaterDo: dbspi.UpdaterDo{
 				Updater: "updater_existing",
 			},
 		},
 	}
 
-	applyUpdateCommonFields(ctx, testCommonFieldOptions(), entity)
+	applyUpdateCommonFields(ctx, testCommonFieldAutoFillOptions(), entity)
 
 	if entity.Mtime != 2 {
 		t.Fatalf("Mtime = %d, want unchanged 2", entity.Mtime)
@@ -232,7 +248,7 @@ func TestApplyUpdateCommonFieldsFillsMissingMutableFields(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
 	entity := &commonFieldTestEntity{}
 
-	applyUpdateCommonFields(ctx, testCommonFieldOptions(), entity)
+	applyUpdateCommonFields(ctx, testCommonFieldAutoFillOptions(), entity)
 
 	if entity.Mtime != 12345 {
 		t.Fatalf("Mtime = %d, want 12345", entity.Mtime)
@@ -244,14 +260,14 @@ func TestApplyUpdateCommonFieldsFillsMissingMutableFields(t *testing.T) {
 
 func TestApplyUpdateCommonFieldsCanOverwriteExplicitValues(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
-	opts := testCommonFieldOptions()
+	opts := testCommonFieldAutoFillOptions()
 	opts.OverwriteExplicitValues = true
 	entity := &commonFieldTestEntity{
 		CommonDo: dbspi.CommonDo{
-			TimeDo: dbspi.TimeDo{
+			UpdateTimeDo: dbspi.UpdateTimeDo{
 				Mtime: 2,
 			},
-			OperatorDo: dbspi.OperatorDo{
+			UpdaterDo: dbspi.UpdaterDo{
 				Updater: "updater_existing",
 			},
 		},
@@ -268,7 +284,7 @@ func TestApplyCommonFieldsSupportsTimeDoOnly(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "operator_a")
 	entity := &commonFieldTimeOnlyTestEntity{}
 
-	applyCreateCommonFields(ctx, testCommonFieldOptions(), entity)
+	applyCreateCommonFields(ctx, testCommonFieldAutoFillOptions(), entity)
 
 	if entity.Ctime != 12345 {
 		t.Fatalf("Ctime = %d, want 12345", entity.Ctime)
@@ -277,9 +293,9 @@ func TestApplyCommonFieldsSupportsTimeDoOnly(t *testing.T) {
 		t.Fatalf("Mtime = %d, want 12345", entity.Mtime)
 	}
 
-	updater := NewUpdater().Add(NewField[string]("name"), "new name")
-	applyUpdateCommonFieldsToUpdater(ctx, testCommonFieldOptions(), entity, updater)
-	params := updater.Params()
+	updater := NewUpdater().Set(NewField[string]("name"), "new name")
+	applyUpdateCommonFieldsToUpdater(ctx, testCommonFieldAutoFillOptions(), entity, updater)
+	params := updater.Values()
 	if params[dbspi.DefaultMtimeFieldName] != uint64(12345) {
 		t.Fatalf("mtime = %v, want 12345", params[dbspi.DefaultMtimeFieldName])
 	}
@@ -292,12 +308,12 @@ func TestApplyUpdateCommonFieldsToUpdaterKeepsExplicitValues(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
 	model := &commonFieldTestEntity{}
 	updater := NewUpdater().
-		Add(NewField[uint64](dbspi.DefaultMtimeFieldName), uint64(9)).
-		Add(NewField[string](dbspi.DefaultUpdaterFieldName), "explicit")
+		Set(NewField[uint64](dbspi.DefaultMtimeFieldName), uint64(9)).
+		Set(NewField[string](dbspi.DefaultUpdaterFieldName), "explicit")
 
-	applyUpdateCommonFieldsToUpdater(ctx, testCommonFieldOptions(), model, updater)
+	applyUpdateCommonFieldsToUpdater(ctx, testCommonFieldAutoFillOptions(), model, updater)
 
-	params := updater.Params()
+	params := updater.Values()
 	if params[dbspi.DefaultMtimeFieldName] != uint64(9) {
 		t.Fatalf("mtime = %v, want explicit 9", params[dbspi.DefaultMtimeFieldName])
 	}
@@ -309,11 +325,11 @@ func TestApplyUpdateCommonFieldsToUpdaterKeepsExplicitValues(t *testing.T) {
 func TestApplyUpdateCommonFieldsToUpdaterAddsMissingValues(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
 	model := &commonFieldTestEntity{}
-	updater := NewUpdater().Add(NewField[string]("name"), "new name")
+	updater := NewUpdater().Set(NewField[string]("name"), "new name")
 
-	applyUpdateCommonFieldsToUpdater(ctx, testCommonFieldOptions(), model, updater)
+	applyUpdateCommonFieldsToUpdater(ctx, testCommonFieldAutoFillOptions(), model, updater)
 
-	params := updater.Params()
+	params := updater.Values()
 	if params[dbspi.DefaultMtimeFieldName] != uint64(12345) {
 		t.Fatalf("mtime = %v, want 12345", params[dbspi.DefaultMtimeFieldName])
 	}
@@ -324,16 +340,16 @@ func TestApplyUpdateCommonFieldsToUpdaterAddsMissingValues(t *testing.T) {
 
 func TestApplyUpdateCommonFieldsToUpdaterCanOverwriteExplicitValues(t *testing.T) {
 	ctx := dbspi.WithOperator(context.Background(), "updater_a")
-	opts := testCommonFieldOptions()
+	opts := testCommonFieldAutoFillOptions()
 	opts.OverwriteExplicitValues = true
 	model := &commonFieldTestEntity{}
 	updater := NewUpdater().
-		Add(NewField[uint64](dbspi.DefaultMtimeFieldName), uint64(9)).
-		Add(NewField[string](dbspi.DefaultUpdaterFieldName), "explicit")
+		Set(NewField[uint64](dbspi.DefaultMtimeFieldName), uint64(9)).
+		Set(NewField[string](dbspi.DefaultUpdaterFieldName), "explicit")
 
 	applyUpdateCommonFieldsToUpdater(ctx, opts, model, updater)
 
-	params := updater.Params()
+	params := updater.Values()
 	if params[dbspi.DefaultMtimeFieldName] != uint64(12345) {
 		t.Fatalf("mtime = %v, want 12345", params[dbspi.DefaultMtimeFieldName])
 	}

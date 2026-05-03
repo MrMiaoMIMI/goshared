@@ -14,11 +14,11 @@ import (
 type ShardOption func(*shardConfig)
 
 type shardConfig struct {
-	dbs            []dbspi.DbTarget
-	dbRule         dbspi.DbShardingRule
+	dbs            []DatabaseTarget
+	dbRule         dbspi.DatabaseShardingRule
 	tableRule      dbspi.TableShardingRule
 	maxConcurrency int
-	commonFields   dbspi.CommonFieldOptions
+	commonFields   dbspi.CommonFieldAutoFillOptions
 }
 
 // NewShardedExecutorWithOptions creates a sharded executor with the given entity and options.
@@ -37,14 +37,14 @@ func NewShardedExecutorWithOptions[T dbspi.Entity](entity T, opts ...ShardOption
 }
 
 // WithDbs sets the database target list for sharding.
-func WithDbs(dbs []dbspi.DbTarget) ShardOption {
+func WithDbs(dbs []DatabaseTarget) ShardOption {
 	return func(c *shardConfig) {
 		c.dbs = dbs
 	}
 }
 
 // WithDbRule sets the database sharding rule.
-func WithDbRule(rule dbspi.DbShardingRule) ShardOption {
+func WithDbRule(rule dbspi.DatabaseShardingRule) ShardOption {
 	return func(c *shardConfig) {
 		c.dbRule = rule
 	}
@@ -64,7 +64,7 @@ func WithMaxConcurrency(n int) ShardOption {
 	}
 }
 
-func WithCommonFields(commonFields dbspi.CommonFieldOptions) ShardOption {
+func WithCommonFieldAutoFill(commonFields dbspi.CommonFieldAutoFillOptions) ShardOption {
 	return func(c *shardConfig) {
 		c.commonFields = commonFields
 	}
@@ -72,7 +72,7 @@ func WithCommonFields(commonFields dbspi.CommonFieldOptions) ShardOption {
 
 // BuildExprDbRule creates an expression-based DB sharding rule from a name template
 // and expand expressions.
-func BuildExprDbRule(nameExpr string, expandExprs []string) (dbspi.DbShardingRule, error) {
+func BuildExprDbRule(nameExpr string, expandExprs []string) (dbspi.DatabaseShardingRule, error) {
 	tmpl, err := expr.ParseTemplate(nameExpr)
 	if err != nil {
 		return nil, fmt.Errorf("parse db name_expr %q: %w", nameExpr, err)
@@ -100,7 +100,7 @@ func BuildExprTableRule(nameExpr string, expandExprs []string) (dbspi.TableShard
 }
 
 // MustBuildExprDbRule is the panic-on-error variant of BuildExprDbRule.
-func MustBuildExprDbRule(nameExpr string, expandExprs ...string) dbspi.DbShardingRule {
+func MustBuildExprDbRule(nameExpr string, expandExprs ...string) dbspi.DatabaseShardingRule {
 	rule, err := BuildExprDbRule(nameExpr, expandExprs)
 	if err != nil {
 		panic(fmt.Sprintf("NewExprDbRule: %v", err))
@@ -117,87 +117,87 @@ func MustBuildExprTableRule(nameExpr string, expandExprs ...string) dbspi.TableS
 	return rule
 }
 
-// SingleDb wraps a single Db into a []DbTarget with key "0".
-func SingleDb(db dbspi.Db) []dbspi.DbTarget {
-	return []dbspi.DbTarget{{Key: "0", Db: db}}
+// SingleDb wraps a single Db into a []DatabaseTarget with key "0".
+func SingleDb(db dbSession) []DatabaseTarget {
+	return []DatabaseTarget{{Key: "0", Db: db}}
 }
 
-// IndexedDbs creates a []DbTarget with sequential string keys ("0", "1", "2", ...).
-func IndexedDbs(dbs ...dbspi.Db) []dbspi.DbTarget {
-	targets := make([]dbspi.DbTarget, len(dbs))
+// IndexedDbs creates a []DatabaseTarget with sequential string keys ("0", "1", "2", ...).
+func IndexedDbs(dbs ...dbSession) []DatabaseTarget {
+	targets := make([]DatabaseTarget, len(dbs))
 	for i, db := range dbs {
-		targets[i] = dbspi.DbTarget{Key: strconv.Itoa(i), Db: db}
+		targets[i] = DatabaseTarget{Key: strconv.Itoa(i), Db: db}
 	}
 	return targets
 }
 
-// NamedDbs creates a []DbTarget with string keys.
-func NamedDbs(dbs map[string]dbspi.Db) []dbspi.DbTarget {
-	targets := make([]dbspi.DbTarget, 0, len(dbs))
+// NamedDbs creates a []DatabaseTarget with string keys.
+func NamedDbs(dbs map[string]dbSession) []DatabaseTarget {
+	targets := make([]DatabaseTarget, 0, len(dbs))
 	for name, db := range dbs {
-		targets = append(targets, dbspi.DbTarget{Key: name, Db: db})
+		targets = append(targets, DatabaseTarget{Key: name, Db: db})
 	}
 	return targets
 }
 
-// DbTargetEntry represents a single entry for generating DbTarget.
-type DbTargetEntry struct {
-	Key    string
-	DbName string
+// DatabaseTargetEntry represents a single entry for generating DatabaseTarget.
+type DatabaseTargetEntry struct {
+	Key          string
+	DatabaseName string
 }
 
-// GenDbTargets creates []DbTarget from a single database server.
-func GenDbTargets(host string, port uint, user, password string, entries ...DbTargetEntry) []dbspi.DbTarget {
-	targets := make([]dbspi.DbTarget, len(entries))
+// GenDatabaseTargets creates []DatabaseTarget from a single database server.
+func GenDatabaseTargets(host string, port uint, user, password string, entries ...DatabaseTargetEntry) []DatabaseTarget {
+	targets := make([]DatabaseTarget, len(entries))
 	for i, entry := range entries {
-		targets[i] = dbspi.DbTarget{
+		targets[i] = DatabaseTarget{
 			Key: entry.Key,
-			Db: NewGormDb(dbspi.DbServerConfig{
-				Host:     host,
-				Port:     port,
-				User:     user,
-				Password: password,
-				DbName:   entry.DbName,
+			Db: NewGormDb(dbspi.ServerConfig{
+				Host:         host,
+				Port:         port,
+				User:         user,
+				Password:     password,
+				DatabaseName: entry.DatabaseName,
 			}),
 		}
 	}
 	return targets
 }
 
-// GenDbTargetsByNames creates []DbTarget where key == dbName.
-func GenDbTargetsByNames(host string, port uint, user, password string, dbNames ...string) []dbspi.DbTarget {
-	entries := make([]DbTargetEntry, len(dbNames))
+// GenDatabaseTargetsByNames creates []DatabaseTarget where key == dbName.
+func GenDatabaseTargetsByNames(host string, port uint, user, password string, dbNames ...string) []DatabaseTarget {
+	entries := make([]DatabaseTargetEntry, len(dbNames))
 	for i, name := range dbNames {
-		entries[i] = DbTargetEntry{Key: name, DbName: name}
+		entries[i] = DatabaseTargetEntry{Key: name, DatabaseName: name}
 	}
-	return GenDbTargets(host, port, user, password, entries...)
+	return GenDatabaseTargets(host, port, user, password, entries...)
 }
 
-// GenDbTargetsByIndex creates []DbTarget with keys "0", "1", "2", ...
-func GenDbTargetsByIndex(host string, port uint, user, password string, prefix string, count int) []dbspi.DbTarget {
-	entries := make([]DbTargetEntry, count)
+// GenDatabaseTargetsByIndex creates []DatabaseTarget with keys "0", "1", "2", ...
+func GenDatabaseTargetsByIndex(host string, port uint, user, password string, prefix string, count int) []DatabaseTarget {
+	entries := make([]DatabaseTargetEntry, count)
 	for i := 0; i < count; i++ {
-		entries[i] = DbTargetEntry{
-			Key:    strconv.Itoa(i),
-			DbName: fmt.Sprintf("%s_%d", prefix, i),
+		entries[i] = DatabaseTargetEntry{
+			Key:          strconv.Itoa(i),
+			DatabaseName: fmt.Sprintf("%s_%d", prefix, i),
 		}
 	}
-	return GenDbTargets(host, port, user, password, entries...)
+	return GenDatabaseTargets(host, port, user, password, entries...)
 }
 
 // ShardingConfig provides a declarative configuration for sharded executors.
 type ShardingConfig struct {
 	// Server configures a single database server.
-	Server *dbspi.DbServerConfig `yaml:"server" json:"server"`
+	Server *dbspi.ServerConfig `yaml:"server" json:"server"`
 
 	// Servers configures multiple database servers.
-	Servers []dbspi.NamedDbServerConfig `yaml:"servers" json:"servers"`
+	Servers []dbspi.NamedServerConfig `yaml:"servers" json:"servers"`
 
 	// Db configures database-level sharding via expressions.
-	Db *dbspi.DbShardConfig `yaml:"db" json:"db"`
+	Db *dbspi.DatabaseShardingConfig `yaml:"db" json:"db"`
 
 	// Table configures table-level sharding via expressions.
-	Table *dbspi.TableShardConfig `yaml:"table" json:"table"`
+	Table *dbspi.TableShardingConfig `yaml:"table" json:"table"`
 
 	// MaxConcurrency limits concurrent goroutines for scatter-gather.
 	MaxConcurrency int `yaml:"max_concurrency" json:"max_concurrency"`
@@ -207,7 +207,7 @@ type ShardingConfig struct {
 func NewShardedExecutorFromConfig[T dbspi.Entity](entity T, cfg ShardingConfig) dbspi.Executor[T] {
 	var opts []ShardOption
 
-	dbs, err := buildDbTargets(cfg)
+	dbs, err := buildDatabaseTargets(cfg)
 	if err != nil {
 		panic(fmt.Sprintf("sharding config: build db targets: %v", err))
 	}
@@ -236,20 +236,20 @@ func NewShardedExecutorFromConfig[T dbspi.Entity](entity T, cfg ShardingConfig) 
 	return NewShardedExecutorWithOptions(entity, opts...)
 }
 
-func newDbFromServer(server dbspi.DbServerConfig, dbName string) dbspi.Db {
+func newDbFromServer(server dbspi.ServerConfig, dbName string) dbSession {
 	if server.DSN == "" && dbName != "" {
-		server.DbName = dbName
+		server.DatabaseName = dbName
 	}
 	return NewGormDb(server)
 }
 
-func buildDbTargets(cfg ShardingConfig) ([]dbspi.DbTarget, error) {
+func buildDatabaseTargets(cfg ShardingConfig) ([]DatabaseTarget, error) {
 	if len(cfg.Servers) > 0 {
-		targets := make([]dbspi.DbTarget, len(cfg.Servers))
+		targets := make([]DatabaseTarget, len(cfg.Servers))
 		for i, s := range cfg.Servers {
-			targets[i] = dbspi.DbTarget{
+			targets[i] = DatabaseTarget{
 				Key: s.Key,
-				Db:  newDbFromServer(s.DbServerConfig, s.DbName),
+				Db:  newDbFromServer(s.ServerConfig, s.DatabaseName),
 			}
 		}
 		return targets, nil
@@ -277,9 +277,9 @@ func buildDbTargets(cfg ShardingConfig) ([]dbspi.DbTarget, error) {
 			return nil, fmt.Errorf("enumerate db names: %w", err)
 		}
 
-		targets := make([]dbspi.DbTarget, len(dbNames))
+		targets := make([]DatabaseTarget, len(dbNames))
 		for i, name := range dbNames {
-			targets[i] = dbspi.DbTarget{
+			targets[i] = DatabaseTarget{
 				Key: name,
 				Db:  newDbFromServer(*cfg.Server, name),
 			}
@@ -287,17 +287,17 @@ func buildDbTargets(cfg ShardingConfig) ([]dbspi.DbTarget, error) {
 		return targets, nil
 	}
 
-	return SingleDb(newDbFromServer(*cfg.Server, cfg.Server.DbName)), nil
+	return SingleDb(newDbFromServer(*cfg.Server, cfg.Server.DatabaseName)), nil
 }
 
-func buildDbRule(cfg *dbspi.DbShardConfig) (dbspi.DbShardingRule, error) {
+func buildDbRule(cfg *dbspi.DatabaseShardingConfig) (dbspi.DatabaseShardingRule, error) {
 	if cfg == nil || cfg.NameExpr == "" {
 		return nil, nil
 	}
 	return BuildExprDbRule(cfg.NameExpr, cfg.ExpandExprs)
 }
 
-func buildTableRule(cfg *dbspi.TableShardConfig) (dbspi.TableShardingRule, error) {
+func buildTableRule(cfg *dbspi.TableShardingConfig) (dbspi.TableShardingRule, error) {
 	if cfg == nil || cfg.NameExpr == "" {
 		return nil, nil
 	}
@@ -337,10 +337,10 @@ func autoInferIdentityComputes(tmpl *expr.Template, expands *expr.ExpandSet) {
 }
 
 type resolvedDbEntry struct {
-	db  dbspi.Db
-	dbs []dbspi.DbTarget
+	db  dbSession
+	dbs []DatabaseTarget
 
-	dbRule           dbspi.DbShardingRule
+	dbRule           dbspi.DatabaseShardingRule
 	defaultTableRule dbspi.TableShardingRule
 	maxConcurrency   int
 
@@ -353,12 +353,12 @@ type entityOverride struct {
 }
 
 type txBoundDbRule struct {
-	rule      dbspi.DbShardingRule
+	rule      dbspi.DatabaseShardingRule
 	targetKey string
 }
 
-func (r txBoundDbRule) ResolveDbKey(key *dbspi.ShardingKey) (string, error) {
-	got, err := r.rule.ResolveDbKey(key)
+func (r txBoundDbRule) ResolveDatabaseTargetKey(key *dbspi.ShardingKey) (string, error) {
+	got, err := r.rule.ResolveDatabaseTargetKey(key)
 	if err != nil {
 		return "", err
 	}
@@ -377,20 +377,17 @@ func (r txBoundDbRuleWithColumns) RequiredColumns() []string {
 	return r.provider.RequiredColumns()
 }
 
-// DbManager manages database connections and sharding configurations.
-type DbManager struct {
+// Manager manages database connections and sharding configurations.
+type Manager struct {
 	mu           sync.RWMutex
 	entries      map[string]*resolvedDbEntry
-	commonFields dbspi.CommonFieldOptions
+	commonFields dbspi.CommonFieldAutoFillOptions
 }
 
-// DBManager marks DbManager as the dbspi.DbManager implementation.
-func (*DbManager) DBManager() {}
-
-// CommonFieldOptions returns the manager-level common-field configuration.
-func (m *DbManager) CommonFieldOptions() dbspi.CommonFieldOptions {
+// CommonFieldAutoFillOptions returns the manager-level common-field configuration.
+func (m *Manager) CommonFieldAutoFillOptions() dbspi.CommonFieldAutoFillOptions {
 	if m == nil {
-		return dbspi.DefaultCommonFieldOptions()
+		return dbspi.DefaultCommonFieldAutoFillOptions()
 	}
 	return m.commonFields
 }
@@ -398,12 +395,12 @@ func (m *DbManager) CommonFieldOptions() dbspi.CommonFieldOptions {
 // Transaction starts a transaction for one database group and passes a
 // transaction-scoped manager to fn. The scoped manager preserves the selected
 // group's table rules but routes all database access through the transaction Db.
-func (m *DbManager) Transaction(ctx context.Context, dbKey string, shardingKey *dbspi.ShardingKey, commonFields dbspi.CommonFieldOptions, fn func(txMgr *DbManager) error) error {
+func (m *Manager) Transaction(ctx context.Context, dbKey string, shardingKey *dbspi.ShardingKey, commonFields dbspi.CommonFieldAutoFillOptions, fn func(txMgr *Manager) error) error {
 	if m == nil {
-		m = DefaultDbManager()
+		m = DefaultManager()
 	}
 	if dbKey == "" {
-		dbKey = dbspi.DefaultDbKey
+		dbKey = dbspi.DefaultDatabaseGroupKey
 	}
 
 	m.mu.RLock()
@@ -418,9 +415,9 @@ func (m *DbManager) Transaction(ctx context.Context, dbKey string, shardingKey *
 		return err
 	}
 
-	return db.Transaction(ctx, func(txDb dbspi.Db) error {
+	return db.Transaction(ctx, func(txDb dbSession) error {
 		txEntry := cloneEntryForTransaction(entry, txDb, targetKey)
-		txMgr := &DbManager{
+		txMgr := &Manager{
 			entries: map[string]*resolvedDbEntry{
 				dbKey: txEntry,
 			},
@@ -430,16 +427,16 @@ func (m *DbManager) Transaction(ctx context.Context, dbKey string, shardingKey *
 	})
 }
 
-func resolveTransactionDb(entry *resolvedDbEntry, shardingKey *dbspi.ShardingKey) (dbspi.Db, string, error) {
+func resolveTransactionDb(entry *resolvedDbEntry, shardingKey *dbspi.ShardingKey) (dbSession, string, error) {
 	if entry.dbRule != nil {
 		if shardingKey == nil {
 			return nil, "", fmt.Errorf("dbhelper: transaction on db-sharded database requires WithTxShardingKey")
 		}
-		targetKey, err := entry.dbRule.ResolveDbKey(shardingKey)
+		targetKey, err := entry.dbRule.ResolveDatabaseTargetKey(shardingKey)
 		if err != nil {
 			return nil, "", fmt.Errorf("resolve transaction db key failed: %w", err)
 		}
-		db, err := findDbTarget(entry.dbs, targetKey)
+		db, err := findDatabaseTarget(entry.dbs, targetKey)
 		if err != nil {
 			return nil, "", err
 		}
@@ -455,19 +452,19 @@ func resolveTransactionDb(entry *resolvedDbEntry, shardingKey *dbspi.ShardingKey
 	return nil, "", fmt.Errorf("dbhelper: transaction database has no Db target")
 }
 
-func findDbTarget(dbs []dbspi.DbTarget, targetKey string) (dbspi.Db, error) {
+func findDatabaseTarget(dbs []DatabaseTarget, targetKey string) (dbSession, error) {
 	for _, target := range dbs {
 		if target.Key == targetKey {
 			return target.Db, nil
 		}
 	}
-	return nil, fmt.Errorf("no DbTarget found for key: %s", targetKey)
+	return nil, fmt.Errorf("no DatabaseTarget found for key: %s", targetKey)
 }
 
-func cloneEntryForTransaction(entry *resolvedDbEntry, txDb dbspi.Db, targetKey string) *resolvedDbEntry {
+func cloneEntryForTransaction(entry *resolvedDbEntry, txDb dbSession, targetKey string) *resolvedDbEntry {
 	txEntry := *entry
 	txEntry.db = txDb
-	txEntry.dbs = []dbspi.DbTarget{{Key: targetKey, Db: txDb}}
+	txEntry.dbs = []DatabaseTarget{{Key: targetKey, Db: txDb}}
 	if entry.dbRule != nil {
 		boundRule := txBoundDbRule{rule: entry.dbRule, targetKey: targetKey}
 		if provider, ok := entry.dbRule.(dbspi.ShardingKeyColumnsProvider); ok {
@@ -480,69 +477,69 @@ func cloneEntryForTransaction(entry *resolvedDbEntry, txDb dbspi.Db, targetKey s
 }
 
 var (
-	defaultManager   *DbManager
+	defaultManager   *Manager
 	defaultManagerMu sync.RWMutex
 )
 
-// NewDbManager creates a new DbManager from the given configuration.
-func NewDbManager(cfg dbspi.DatabaseConfig, commonFields dbspi.CommonFieldOptions) *DbManager {
-	mgr := &DbManager{
-		entries:      make(map[string]*resolvedDbEntry, len(cfg.Databases)),
+// NewManager creates a new Manager from the given configuration.
+func NewManager(cfg dbspi.DatabaseConfig, commonFields dbspi.CommonFieldAutoFillOptions) *Manager {
+	mgr := &Manager{
+		entries:      make(map[string]*resolvedDbEntry, len(cfg.DatabaseGroups)),
 		commonFields: commonFields.Normalize(),
 	}
-	for name, entry := range cfg.Databases {
+	for name, entry := range cfg.DatabaseGroups {
 		mgr.entries[name] = resolveDbEntry(entry)
 	}
 	return mgr
 }
 
-// SetDefaultDbManager sets the global default DbManager.
-func SetDefaultDbManager(mgr *DbManager) {
+// SetDefaultManager sets the global default Manager.
+func SetDefaultManager(mgr *Manager) {
 	defaultManagerMu.Lock()
 	defer defaultManagerMu.Unlock()
 	defaultManager = mgr
 }
 
-// DefaultDbManager returns the global default DbManager.
-func DefaultDbManager() *DbManager {
+// DefaultManager returns the global default Manager.
+func DefaultManager() *Manager {
 	defaultManagerMu.RLock()
 	defer defaultManagerMu.RUnlock()
 	if defaultManager == nil {
-		panic("dbhelper: default DbManager not initialized, call dbhelper.SetDefault() first")
+		panic("dbhelper: default Manager not initialized, call dbhelper.SetDefaultManager() first")
 	}
 	return defaultManager
 }
 
-// For creates an Executor for the given entity using the DbManager.
-func For[T dbspi.Entity](entity T, managers ...*DbManager) dbspi.Executor[T] {
-	var mgr *DbManager
+// For creates an Executor for the given entity using the Manager.
+func For[T dbspi.Entity](entity T, managers ...*Manager) dbspi.Executor[T] {
+	var mgr *Manager
 	if len(managers) > 0 && managers[0] != nil {
 		mgr = managers[0]
 	} else {
-		mgr = DefaultDbManager()
+		mgr = DefaultManager()
 	}
-	return ForWithCommonFields(entity, mgr, mgr.commonFields)
+	return ForWithCommonFieldAutoFill(entity, mgr, mgr.commonFields)
 }
 
-func ForWithCommonFields[T dbspi.Entity](entity T, mgr *DbManager, commonFields dbspi.CommonFieldOptions) dbspi.Executor[T] {
+func ForWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields dbspi.CommonFieldAutoFillOptions) dbspi.Executor[T] {
 	if mgr == nil {
-		mgr = DefaultDbManager()
+		mgr = DefaultManager()
 	}
 	commonFields = commonFields.Normalize()
-	key := dbspi.DefaultDbKey
-	if provider, ok := any(entity).(dbspi.DbKeyProvider); ok {
-		key = provider.DbKey()
+	key := dbspi.DefaultDatabaseGroupKey
+	if provider, ok := any(entity).(dbspi.DatabaseGroupKeyProvider); ok {
+		key = provider.DatabaseGroupKey()
 	}
 
 	mgr.mu.RLock()
 	entry, ok := mgr.entries[key]
 	if !ok {
-		entry, ok = mgr.entries[dbspi.DefaultDbKey]
+		entry, ok = mgr.entries[dbspi.DefaultDatabaseGroupKey]
 	}
 	mgr.mu.RUnlock()
 
 	if !ok {
-		panic(fmt.Sprintf("dbhelper: database config %q not found (and no %q fallback)", key, dbspi.DefaultDbKey))
+		panic(fmt.Sprintf("dbhelper: database config %q not found (and no %q fallback)", key, dbspi.DefaultDatabaseGroupKey))
 	}
 
 	tableName := entity.TableName()
@@ -563,7 +560,7 @@ func ForWithCommonFields[T dbspi.Entity](entity T, mgr *DbManager, commonFields 
 		if db == nil && len(entry.dbs) > 0 {
 			db = entry.dbs[0].Db
 		}
-		return NewExecutorWithCommonFields(db, entity, commonFields)
+		return NewExecutorWithCommonFieldAutoFill(db, entity, commonFields)
 	}
 
 	var opts []ShardOption
@@ -581,12 +578,12 @@ func ForWithCommonFields[T dbspi.Entity](entity T, mgr *DbManager, commonFields 
 	if maxConcurrency > 0 {
 		opts = append(opts, WithMaxConcurrency(maxConcurrency))
 	}
-	opts = append(opts, WithCommonFields(commonFields))
+	opts = append(opts, WithCommonFieldAutoFill(commonFields))
 	return NewShardedExecutorWithOptions(entity, opts...)
 }
 
-// ForEnhance creates an EnhancedExecutor for the given entity using the DbManager.
-func ForEnhance[T dbspi.Entity](entity T, managers ...*DbManager) dbspi.EnhancedExecutor[T] {
+// ForEnhance creates an EnhancedExecutor for the given entity using the Manager.
+func ForEnhance[T dbspi.Entity](entity T, managers ...*Manager) dbspi.EnhancedExecutor[T] {
 	exec := For(entity, managers...)
 	enhanced, ok := exec.(dbspi.EnhancedExecutor[T])
 	if !ok {
@@ -595,8 +592,8 @@ func ForEnhance[T dbspi.Entity](entity T, managers ...*DbManager) dbspi.Enhanced
 	return enhanced
 }
 
-func ForEnhanceWithCommonFields[T dbspi.Entity](entity T, mgr *DbManager, commonFields dbspi.CommonFieldOptions) dbspi.EnhancedExecutor[T] {
-	exec := ForWithCommonFields(entity, mgr, commonFields)
+func ForEnhanceWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields dbspi.CommonFieldAutoFillOptions) dbspi.EnhancedExecutor[T] {
+	exec := ForWithCommonFieldAutoFill(entity, mgr, commonFields)
 	enhanced, ok := exec.(dbspi.EnhancedExecutor[T])
 	if !ok {
 		panic("dbhelper: resolved executor does not implement EnhancedExecutor")
@@ -604,43 +601,43 @@ func ForEnhanceWithCommonFields[T dbspi.Entity](entity T, mgr *DbManager, common
 	return enhanced
 }
 
-func resolveDbEntry(entry dbspi.DatabaseEntry) *resolvedDbEntry {
+func resolveDbEntry(entry dbspi.DatabaseGroupConfig) *resolvedDbEntry {
 	resolved := &resolvedDbEntry{
 		entityOverrides: make(map[string]*entityOverride),
 		maxConcurrency:  entry.MaxConcurrency,
 	}
 
-	serverCfg := toDbServerConfig(entry)
+	serverCfg := toServerConfig(entry)
 
-	if entry.DbSharding != nil || len(entry.Servers) > 0 {
-		if entry.DbSharding != nil && len(entry.Servers) == 0 && entry.DSN != "" {
-			panic("dbhelper: DSN cannot be used with db_sharding on a single server " +
+	if entry.DatabaseSharding != nil || len(entry.Servers) > 0 {
+		if entry.DatabaseSharding != nil && len(entry.Servers) == 0 && entry.DSN != "" {
+			panic("dbhelper: DSN cannot be used with database_sharding on a single server " +
 				"(DSN includes the database name). Use Host/Port/User/Password fields instead, " +
 				"or use the Servers list with per-server DSN")
 		}
 
 		shardCfg := ShardingConfig{
-			Db: entry.DbSharding,
+			Db: entry.DatabaseSharding,
 		}
 		if len(entry.Servers) > 0 {
 			shardCfg.Servers = entry.Servers
 		} else {
 			shardCfg.Server = &serverCfg
 		}
-		dbs, err := buildDbTargets(shardCfg)
+		dbs, err := buildDatabaseTargets(shardCfg)
 		if err != nil {
 			panic(fmt.Sprintf("dbhelper: build db targets: %v", err))
 		}
 		resolved.dbs = dbs
-		if entry.DbSharding != nil {
-			rule, err := buildDbRule(entry.DbSharding)
+		if entry.DatabaseSharding != nil {
+			rule, err := buildDbRule(entry.DatabaseSharding)
 			if err != nil {
 				panic(fmt.Sprintf("dbhelper: build db rule: %v", err))
 			}
 			resolved.dbRule = rule
 		}
 	} else {
-		resolved.db = newDbFromServer(serverCfg, entry.DbName)
+		resolved.db = newDbFromServer(serverCfg, entry.DatabaseName)
 	}
 
 	if entry.TableSharding != nil {
@@ -651,7 +648,7 @@ func resolveDbEntry(entry dbspi.DatabaseEntry) *resolvedDbEntry {
 		resolved.defaultTableRule = rule
 	}
 
-	for _, rule := range entry.EntityRules {
+	for _, rule := range entry.TableRules {
 		override := &entityOverride{
 			maxConcurrency: rule.MaxConcurrency,
 		}
@@ -676,14 +673,14 @@ func resolveDbEntry(entry dbspi.DatabaseEntry) *resolvedDbEntry {
 	return resolved
 }
 
-func toDbServerConfig(entry dbspi.DatabaseEntry) dbspi.DbServerConfig {
-	return dbspi.DbServerConfig{
+func toServerConfig(entry dbspi.DatabaseGroupConfig) dbspi.ServerConfig {
+	return dbspi.ServerConfig{
 		DSN:                    entry.DSN,
 		Host:                   entry.Host,
 		Port:                   entry.Port,
 		User:                   entry.User,
 		Password:               entry.Password,
-		DbName:                 entry.DbName,
+		DatabaseName:           entry.DatabaseName,
 		Debug:                  entry.Debug,
 		MaxOpenConns:           entry.MaxOpenConns,
 		MaxIdleConns:           entry.MaxIdleConns,

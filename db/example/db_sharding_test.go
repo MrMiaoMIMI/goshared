@@ -32,7 +32,7 @@ func (*Order) TableName() string {
 	return "order_tab"
 }
 
-func (*Order) DbKey() string {
+func (*Order) DatabaseGroupKey() string {
 	return "order_dbs"
 }
 
@@ -158,7 +158,7 @@ func Test_Sharding_RegionDb(t *testing.T) {
 // ==================== Example 7: Non-sharded executor ====================
 
 func Test_Sharding_NonShardedExecutor(t *testing.T) {
-	executor := dbhelper.For(&User{}, dbhelper.WithDbManager(testDbManager(testDbName)))
+	executor := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(testManager(testDatabaseName)))
 
 	ctx := context.Background()
 

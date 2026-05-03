@@ -9,16 +9,16 @@ import (
 )
 
 // ================================================================
-// DbManager Example: Top-down configuration-driven database management
+// Manager Example: Top-down configuration-driven database management
 //
-// One config → one DbManager → all executors.
-// Entity declares its database group via DbKey().
-// No need to manually create Db, DbTarget, or sharding rules.
+// One config → one Manager → all executors.
+// Entity declares its database group via DatabaseGroupKey().
+// No need to manually create database sessions or sharding rules.
 // ================================================================
 
 // ==================== Entity Definitions ====================
 
-// User is a non-sharded entity. No DbKey() uses dbspi.DefaultDbKey.
+// User is a non-sharded entity. No DatabaseGroupKey() uses dbspi.DefaultDatabaseGroupKey.
 // (User struct is defined in db_test.go)
 
 // OrderItem shares the same database group as Order.
@@ -29,9 +29,9 @@ type OrderItem struct {
 	Name    string
 }
 
-func (*OrderItem) TableName() string   { return "order_item_tab" }
-func (*OrderItem) DbKey() string       { return "order_dbs" }
-func (*OrderItem) IdFieldName() string { return dbspi.DefaultIdFieldName }
+func (*OrderItem) TableName() string        { return "order_item_tab" }
+func (*OrderItem) DatabaseGroupKey() string { return "order_dbs" }
+func (*OrderItem) IdFieldName() string      { return dbspi.DefaultIdFieldName }
 
 // OrderDetail shares the same database group but has different table sharding.
 type OrderDetail struct {
@@ -41,23 +41,23 @@ type OrderDetail struct {
 	Detail  string
 }
 
-func (*OrderDetail) TableName() string   { return "order_detail_tab" }
-func (*OrderDetail) DbKey() string       { return "order_dbs" }
-func (*OrderDetail) IdFieldName() string { return dbspi.DefaultIdFieldName }
+func (*OrderDetail) TableName() string        { return "order_detail_tab" }
+func (*OrderDetail) DatabaseGroupKey() string { return "order_dbs" }
+func (*OrderDetail) IdFieldName() string      { return dbspi.DefaultIdFieldName }
 
-// ==================== DbManager: Non-sharded ====================
+// ==================== Manager: Non-sharded ====================
 
-func Test_DbManager_Simple(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: {
+func Test_Manager_Simple(t *testing.T) {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbName: testAppDbName,
+				DatabaseName: testAppDatabaseName,
 			},
 		},
 	})
 
-	userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))
+	userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
 	users, err := userExec.Find(ctx, nil, nil)
@@ -67,39 +67,39 @@ func Test_DbManager_Simple(t *testing.T) {
 	}
 }
 
-func Test_DbManager_ForEnhance_Simple(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: {
+func Test_Manager_NewEnhancedExecutor_Simple(t *testing.T) {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbName: testAppDbName,
+				DatabaseName: testAppDatabaseName,
 			},
 		},
 	})
 
-	userExec := dbhelper.ForEnhance(&User{}, dbhelper.WithDbManager(mgr))
+	userExec := dbhelper.NewEnhancedExecutor(&User{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
-	count, err := userExec.CountWithoutDeleted(ctx, nil)
+	count, err := userExec.CountNotDeleted(ctx, nil)
 	requireNoError(t, err)
 	if count == 0 {
 		t.Fatal("expected non-deleted user count")
 	}
 }
 
-// ==================== DbManager: DSN mode ====================
+// ==================== Manager: DSN mode ====================
 
-func Test_DbManager_DSN(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: {
-				DSN:          testDSN(testAppDbName),
+func Test_Manager_DSN(t *testing.T) {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: {
+				DSN:          testDSN(testAppDatabaseName),
 				MaxOpenConns: 200,
 			},
 		},
 	})
 
-	userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))
+	userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
 	users, err := userExec.Find(ctx, nil, nil)
@@ -109,30 +109,30 @@ func Test_DbManager_DSN(t *testing.T) {
 	}
 }
 
-// ==================== DbManager: Sharded with reuse ====================
+// ==================== Manager: Sharded with reuse ====================
 
-func Test_DbManager_ShardedWithReuse(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: {
+func Test_Manager_ShardedWithReuse(t *testing.T) {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbName: testAppDbName,
+				DatabaseName: testAppDatabaseName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbSharding: &dbspi.DbShardConfig{
+				DatabaseSharding: &dbspi.DatabaseShardingConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
-				TableSharding: &dbspi.TableShardConfig{
+				TableSharding: &dbspi.TableShardingConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
 				MaxConcurrency: 5,
-				EntityRules: []dbspi.EntityRule{
+				TableRules: []dbspi.TableRule{
 					{
 						Tables: []string{"order_detail_tab"},
-						TableSharding: &dbspi.TableShardConfig{
+						TableSharding: &dbspi.TableShardingConfig{
 							NameExpr:    "order_detail_tab_${index}",
 							ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 						},
@@ -142,9 +142,9 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
-	itemExec := dbhelper.For(&OrderItem{}, dbhelper.WithDbManager(mgr))
-	detailExec := dbhelper.For(&OrderDetail{}, dbhelper.WithDbManager(mgr))
+	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
+	itemExec := dbhelper.NewExecutor(&OrderItem{}, dbhelper.WithManager(mgr))
+	detailExec := dbhelper.NewExecutor(&OrderDetail{}, dbhelper.WithManager(mgr))
 
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
@@ -159,22 +159,22 @@ func Test_DbManager_ShardedWithReuse(t *testing.T) {
 	requireNoError(t, err)
 }
 
-// ==================== DbManager: Named db sharding ====================
+// ==================== Manager: Named db sharding ====================
 
-func Test_DbManager_NamedDbSharding(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: {
+func Test_Manager_NamedDatabaseSharding(t *testing.T) {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbName: testAppDbName,
+				DatabaseName: testAppDatabaseName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbSharding: &dbspi.DbShardConfig{
+				DatabaseSharding: &dbspi.DatabaseShardingConfig{
 					NameExpr:    "order_${region}_db",
 					ExpandExprs: []string{"${region} := enum(SG, TH)", "${region} = @{region}"},
 				},
-				TableSharding: &dbspi.TableShardConfig{
+				TableSharding: &dbspi.TableShardingConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
@@ -182,7 +182,7 @@ func Test_DbManager_NamedDbSharding(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
+	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
 
 	sk := dbspi.NewShardingKey().
 		Set(OrderFields.Region, "SG").
@@ -192,22 +192,22 @@ func Test_DbManager_NamedDbSharding(t *testing.T) {
 	requireNoError(t, err)
 }
 
-// ==================== DbManager: Global default ====================
+// ==================== Manager: Global default ====================
 
-func Test_DbManager_GlobalDefault(t *testing.T) {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: {
+func Test_Manager_GlobalDefault(t *testing.T) {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbName: testAppDbName,
+				DatabaseName: testAppDatabaseName,
 			},
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbSharding: &dbspi.DbShardConfig{
+				DatabaseSharding: &dbspi.DatabaseShardingConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
-				TableSharding: &dbspi.TableShardConfig{
+				TableSharding: &dbspi.TableShardingConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
@@ -215,10 +215,10 @@ func Test_DbManager_GlobalDefault(t *testing.T) {
 		},
 	})
 
-	dbhelper.SetDefault(mgr)
+	dbhelper.SetDefaultManager(mgr)
 
-	userExec := dbhelper.For(&User{})
-	orderExec := dbhelper.For(&Order{})
+	userExec := dbhelper.NewExecutor(&User{})
+	orderExec := dbhelper.NewExecutor(&Order{})
 
 	ctx := context.Background()
 	users, err := userExec.Find(ctx, nil, nil)

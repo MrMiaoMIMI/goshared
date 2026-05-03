@@ -18,8 +18,8 @@ func OperatorFromContext(ctx context.Context) (string, bool) {
 	return operator, ok
 }
 
-// NowUnixMilli returns the current Unix timestamp in milliseconds.
-func NowUnixMilli() uint64 {
+// DefaultTimeProvider returns the current Unix timestamp in milliseconds.
+func DefaultTimeProvider() uint64 {
 	return uint64(time.Now().UnixMilli())
 }
 
@@ -31,10 +31,10 @@ type OperatorProvider func(ctx context.Context) (string, bool)
 // The unit is application-defined. The default provider uses Unix milliseconds.
 type TimeProvider func() uint64
 
-// CommonFieldOptions configures automatic maintenance for common fields.
-type CommonFieldOptions struct {
-	// Enabled controls whether executors apply common-field automation at all.
-	Enabled bool
+// CommonFieldAutoFillOptions configures automatic maintenance for common fields.
+type CommonFieldAutoFillOptions struct {
+	// AutoFillEnabled controls whether executors apply common-field automation at all.
+	AutoFillEnabled bool
 
 	// OverwriteExplicitValues controls whether generated common-field values may
 	// overwrite values already provided by the caller.
@@ -54,26 +54,26 @@ type CommonFieldOptions struct {
 	OperatorProvider OperatorProvider
 }
 
-// DefaultCommonFieldOptions returns the default common-field behavior.
+// DefaultCommonFieldAutoFillOptions returns the default common-field behavior.
 //
 // Common-field automation is enabled by default, uses Unix milliseconds for
 // ctime/mtime, and resolves creator/updater from ctx with OperatorFromContext.
-func DefaultCommonFieldOptions() CommonFieldOptions {
-	return CommonFieldOptions{
-		Enabled:          true,
-		TimeProvider:     NowUnixMilli,
+func DefaultCommonFieldAutoFillOptions() CommonFieldAutoFillOptions {
+	return CommonFieldAutoFillOptions{
+		AutoFillEnabled:  true,
+		TimeProvider:     DefaultTimeProvider,
 		OperatorProvider: OperatorFromContext,
 	}
 }
 
-// DisabledCommonFieldOptions disables common-field behavior.
-func DisabledCommonFieldOptions() CommonFieldOptions {
-	return CommonFieldOptions{}
+// DisabledCommonFieldAutoFillOptions disables common-field behavior.
+func DisabledCommonFieldAutoFillOptions() CommonFieldAutoFillOptions {
+	return CommonFieldAutoFillOptions{}
 }
 
 // Normalize fills missing function hooks with defaults.
-func (o CommonFieldOptions) Normalize() CommonFieldOptions {
-	defaults := DefaultCommonFieldOptions()
+func (o CommonFieldAutoFillOptions) Normalize() CommonFieldAutoFillOptions {
+	defaults := DefaultCommonFieldAutoFillOptions()
 	if o.TimeProvider == nil {
 		o.TimeProvider = defaults.TimeProvider
 	}
@@ -105,175 +105,204 @@ func (*IdDo) IdFieldName() string {
 	return DefaultIdFieldName
 }
 
-// DeletedDo provides the standard soft-delete field.
-type DeletedDo struct {
+// SoftDeleteDo provides the standard soft-delete field.
+type SoftDeleteDo struct {
 	Deleted bool `gorm:"column:deleted;not null;default:false" json:"deleted"`
 }
 
-func (c *DeletedDo) GetDeleted() bool {
+func (c *SoftDeleteDo) GetDeleted() bool {
 	if c == nil {
 		return false
 	}
 	return c.Deleted
 }
 
-func (c *DeletedDo) SetDeleted(v bool) {
+func (c *SoftDeleteDo) SetDeleted(v bool) {
 	if c != nil {
 		c.Deleted = v
 	}
 }
 
-func (*DeletedDo) DeletedFieldName() string {
+func (*SoftDeleteDo) DeletedFieldName() string {
 	return DefaultDeletedFieldName
 }
 
-// TimeDo provides standard create and update timestamps.
+// CreateTimeDo provides the standard create timestamp field.
 //
-// By default, dbhelper-managed executors fill these fields with Unix
+// By default, dbhelper-managed executors fill this field with Unix
 // milliseconds. Use dbhelper.WithCommonFieldTimeProvider to customize the unit.
-type TimeDo struct {
+type CreateTimeDo struct {
 	Ctime uint64 `gorm:"column:ctime;not null;default:0" json:"ctime"`
-	Mtime uint64 `gorm:"column:mtime;not null;default:0" json:"mtime"`
 }
 
-func (c *TimeDo) GetCtime() uint64 {
+func (c *CreateTimeDo) GetCtime() uint64 {
 	if c == nil {
 		return 0
 	}
 	return c.Ctime
 }
 
-func (c *TimeDo) SetCtime(v uint64) {
+func (c *CreateTimeDo) SetCtime(v uint64) {
 	if c != nil {
 		c.Ctime = v
 	}
 }
 
-func (*TimeDo) CtimeFieldName() string {
+func (*CreateTimeDo) CtimeFieldName() string {
 	return DefaultCtimeFieldName
 }
 
-func (c *TimeDo) GetMtime() uint64 {
+// UpdateTimeDo provides the standard update timestamp field.
+//
+// By default, dbhelper-managed executors fill this field with Unix
+// milliseconds. Use dbhelper.WithCommonFieldTimeProvider to customize the unit.
+type UpdateTimeDo struct {
+	Mtime uint64 `gorm:"column:mtime;not null;default:0" json:"mtime"`
+}
+
+func (c *UpdateTimeDo) GetMtime() uint64 {
 	if c == nil {
 		return 0
 	}
 	return c.Mtime
 }
 
-func (c *TimeDo) SetMtime(v uint64) {
+func (c *UpdateTimeDo) SetMtime(v uint64) {
 	if c != nil {
 		c.Mtime = v
 	}
 }
 
-func (*TimeDo) MtimeFieldName() string {
+func (*UpdateTimeDo) MtimeFieldName() string {
 	return DefaultMtimeFieldName
 }
 
-// OperatorDo provides standard creator and updater fields.
-type OperatorDo struct {
-	Creator string `gorm:"column:creator;size:255;not null;default:''" json:"creator"`
-	Updater string `gorm:"column:updater;size:255;not null;default:''" json:"updater"`
+// TimeDo provides standard create and update timestamp fields.
+type TimeDo struct {
+	CreateTimeDo
+	UpdateTimeDo
 }
 
-func (c *OperatorDo) GetCreator() string {
+// CreatorDo provides the standard creator field.
+type CreatorDo struct {
+	Creator string `gorm:"column:creator;size:255;not null;default:''" json:"creator"`
+}
+
+func (c *CreatorDo) GetCreator() string {
 	if c == nil {
 		return ""
 	}
 	return c.Creator
 }
 
-func (c *OperatorDo) SetCreator(v string) {
+func (c *CreatorDo) SetCreator(v string) {
 	if c != nil {
 		c.Creator = v
 	}
 }
 
-func (*OperatorDo) CreatorFieldName() string {
+func (*CreatorDo) CreatorFieldName() string {
 	return DefaultCreatorFieldName
 }
 
-func (c *OperatorDo) GetUpdater() string {
+// UpdaterDo provides the standard updater field.
+type UpdaterDo struct {
+	Updater string `gorm:"column:updater;size:255;not null;default:''" json:"updater"`
+}
+
+func (c *UpdaterDo) GetUpdater() string {
 	if c == nil {
 		return ""
 	}
 	return c.Updater
 }
 
-func (c *OperatorDo) SetUpdater(v string) {
+func (c *UpdaterDo) SetUpdater(v string) {
 	if c != nil {
 		c.Updater = v
 	}
 }
 
-func (*OperatorDo) UpdaterFieldName() string {
+func (*UpdaterDo) UpdaterFieldName() string {
 	return DefaultUpdaterFieldName
+}
+
+// OperatorDo provides standard creator and updater fields.
+type OperatorDo struct {
+	CreatorDo
+	UpdaterDo
 }
 
 // CommonDo provides the complete standard field set shared by data objects.
 type CommonDo struct {
 	IdDo
-	OperatorDo
-	TimeDo
-	DeletedDo
+	CreatorDo
+	UpdaterDo
+	CreateTimeDo
+	UpdateTimeDo
+	SoftDeleteDo
 }
 
 type IdFieldNamer interface {
 	IdFieldName() string
 }
 
-type DeletedFieldNamer interface {
+type SoftDeleteFieldNamer interface {
 	DeletedFieldName() string
 }
 
-type IdManaged interface {
+type IdAccessor interface {
 	IdFieldNamer
 	GetId() uint64
 	SetId(uint64)
 }
 
-type DeletedManaged interface {
-	DeletedFieldNamer
+type SoftDeleteAccessor interface {
+	SoftDeleteFieldNamer
 	GetDeleted() bool
 	SetDeleted(bool)
 }
 
-type CreateTimeManaged interface {
+type CreateTimeAccessor interface {
 	GetCtime() uint64
 	SetCtime(uint64)
 	CtimeFieldName() string
 }
 
-type UpdateTimeManaged interface {
+type UpdateTimeAccessor interface {
 	GetMtime() uint64
 	SetMtime(uint64)
 	MtimeFieldName() string
 }
 
-type CreatorManaged interface {
+type CreatorAccessor interface {
 	GetCreator() string
 	SetCreator(string)
 	CreatorFieldName() string
 }
 
-type UpdaterManaged interface {
+type UpdaterAccessor interface {
 	GetUpdater() string
 	SetUpdater(string)
 	UpdaterFieldName() string
 }
 
 var (
-	_ IdManaged         = (*IdDo)(nil)
-	_ DeletedManaged    = (*DeletedDo)(nil)
-	_ CreateTimeManaged = (*TimeDo)(nil)
-	_ UpdateTimeManaged = (*TimeDo)(nil)
-	_ CreatorManaged    = (*OperatorDo)(nil)
-	_ UpdaterManaged    = (*OperatorDo)(nil)
+	_ IdAccessor         = (*IdDo)(nil)
+	_ SoftDeleteAccessor = (*SoftDeleteDo)(nil)
+	_ CreateTimeAccessor = (*CreateTimeDo)(nil)
+	_ UpdateTimeAccessor = (*UpdateTimeDo)(nil)
+	_ CreatorAccessor    = (*CreatorDo)(nil)
+	_ UpdaterAccessor    = (*UpdaterDo)(nil)
+	_ CreateTimeAccessor = (*TimeDo)(nil)
+	_ UpdateTimeAccessor = (*TimeDo)(nil)
+	_ CreatorAccessor    = (*OperatorDo)(nil)
+	_ UpdaterAccessor    = (*OperatorDo)(nil)
 
-	_ IdManaged         = (*CommonDo)(nil)
-	_ DeletedManaged    = (*CommonDo)(nil)
-	_ CreateTimeManaged = (*CommonDo)(nil)
-	_ UpdateTimeManaged = (*CommonDo)(nil)
-	_ CreatorManaged    = (*CommonDo)(nil)
-	_ UpdaterManaged    = (*CommonDo)(nil)
+	_ IdAccessor         = (*CommonDo)(nil)
+	_ SoftDeleteAccessor = (*CommonDo)(nil)
+	_ CreateTimeAccessor = (*CommonDo)(nil)
+	_ UpdateTimeAccessor = (*CommonDo)(nil)
+	_ CreatorAccessor    = (*CommonDo)(nil)
+	_ UpdaterAccessor    = (*CommonDo)(nil)
 )

@@ -511,17 +511,17 @@ func NewUpdater() *GormUpdater {
 	}
 }
 
-// Add implements dbspi.Updater
-func (u *GormUpdater) Add(column dbspi.Column, value any) dbspi.Updater {
+// Set implements dbspi.Updater.
+func (u *GormUpdater) Set(column dbspi.Column, value any) dbspi.Updater {
 	key := column.Name()
 	u.updates[key] = value
 	return u
 }
 
-// AddByMap implements dbspi.Updater
-func (u *GormUpdater) AddByMap(columnMap map[dbspi.Column]any) dbspi.Updater {
+// SetMap implements dbspi.Updater
+func (u *GormUpdater) SetMap(columnMap map[dbspi.Column]any) dbspi.Updater {
 	for col, val := range columnMap {
-		u.Add(col, val)
+		u.Set(col, val)
 	}
 	return u
 }
@@ -533,8 +533,8 @@ func (u *GormUpdater) Remove(column dbspi.Column) dbspi.Updater {
 	return u
 }
 
-// Params implements dbspi.Updater
-func (u *GormUpdater) Params() map[string]any {
+// Values implements dbspi.Updater.
+func (u *GormUpdater) Values() map[string]any {
 	return u.updates
 }
 
@@ -542,19 +542,19 @@ func (u *GormUpdater) Params() map[string]any {
 
 // GormExecutor implements dbspi.Executor[T]
 type GormExecutor[T dbspi.Entity] struct {
-	db                  dbspi.Db
+	db                  dbSession
 	emptyEntityInstance T
-	commonFields        dbspi.CommonFieldOptions
+	commonFields        dbspi.CommonFieldAutoFillOptions
 }
 
 // NewExecutor creates a new GormExecutor with the given entity instance
 // Example:
 // NewExecutor(db, &User{})
-func NewExecutor[T dbspi.Entity](db dbspi.Db, entityInstance T) *GormExecutor[T] {
+func NewExecutor[T dbspi.Entity](db dbSession, entityInstance T) *GormExecutor[T] {
 	return NewExecutorWithTableName(db, entityInstance, entityInstance.TableName())
 }
 
-func NewExecutorWithCommonFields[T dbspi.Entity](db dbspi.Db, entityInstance T, commonFields dbspi.CommonFieldOptions) *GormExecutor[T] {
+func NewExecutorWithCommonFieldAutoFill[T dbspi.Entity](db dbSession, entityInstance T, commonFields dbspi.CommonFieldAutoFillOptions) *GormExecutor[T] {
 	return newExecutorWithTableName(db, entityInstance, entityInstance.TableName(), commonFields)
 }
 
@@ -576,15 +576,15 @@ func (e *GormExecutor[T]) CountAll(ctx context.Context, query dbspi.Query) (uint
 // NewExecutorWithTableName creates a new GormExecutor with the given entity instance and table name
 // Example:
 // NewExecutorWithTableName(db, &User{}, "user_tab_00000001")
-func NewExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string) *GormExecutor[T] {
-	return newExecutorWithTableName(db, entityInstance, tableName, dbspi.DisabledCommonFieldOptions())
+func NewExecutorWithTableName[T dbspi.Entity](db dbSession, entityInstance T, tableName string) *GormExecutor[T] {
+	return newExecutorWithTableName(db, entityInstance, tableName, dbspi.DisabledCommonFieldAutoFillOptions())
 }
 
-func NewExecutorWithTableNameAndCommonFields[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string, commonFields dbspi.CommonFieldOptions) *GormExecutor[T] {
+func NewExecutorWithTableNameAndCommonFields[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields dbspi.CommonFieldAutoFillOptions) *GormExecutor[T] {
 	return newExecutorWithTableName(db, entityInstance, tableName, commonFields)
 }
 
-func newExecutorWithTableName[T dbspi.Entity](db dbspi.Db, entityInstance T, tableName string, commonFields dbspi.CommonFieldOptions) *GormExecutor[T] {
+func newExecutorWithTableName[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields dbspi.CommonFieldAutoFillOptions) *GormExecutor[T] {
 	if any(entityInstance) == nil {
 		panic("entityInstance is nil")
 	}
@@ -635,9 +635,9 @@ func (e *GormExecutor[T]) DeleteById(ctx context.Context, id any) error {
 }
 
 // Find implements dbspi.Executor
-func (e *GormExecutor[T]) Find(ctx context.Context, query dbspi.Query, pagenation dbspi.PaginationConfig) ([]T, error) {
+func (e *GormExecutor[T]) Find(ctx context.Context, query dbspi.Query, pagination dbspi.Pagination) ([]T, error) {
 	var results []T
-	err := e.db.Find(ctx, &results, query, pagenation)
+	err := e.db.Find(ctx, &results, query, pagination)
 	return results, err
 }
 
@@ -645,7 +645,7 @@ func (e *GormExecutor[T]) Find(ctx context.Context, query dbspi.Query, pagenatio
 func (e *GormExecutor[T]) Exists(ctx context.Context, query dbspi.Query) (bool, T, error) {
 	var entity T
 	limit := 1
-	paginationConfig := NewPaginationConfig().WithLimit(&limit)
+	paginationConfig := NewPagination().WithLimit(&limit)
 	entities, err := e.Find(ctx, query, paginationConfig)
 	if err != nil {
 		return false, entity, err
@@ -741,8 +741,8 @@ type GormDb struct {
 }
 
 // NewGormDb creates a new GormDb.
-func NewGormDb(dbConfig dbspi.DbServerConfig) dbspi.Db {
-	dbConfig = normalizeDbServerConfig(dbConfig)
+func NewGormDb(dbConfig dbspi.ServerConfig) dbSession {
+	dbConfig = normalizeServerConfig(dbConfig)
 	gormCfg := &gorm.Config{}
 
 	db, err := gorm.Open(mysql.Open(dbServerDSN(dbConfig)), gormCfg)
@@ -773,7 +773,7 @@ func NewGormDb(dbConfig dbspi.DbServerConfig) dbspi.Db {
 	}
 }
 
-func normalizeDbServerConfig(cfg dbspi.DbServerConfig) dbspi.DbServerConfig {
+func normalizeServerConfig(cfg dbspi.ServerConfig) dbspi.ServerConfig {
 	if cfg.MaxOpenConns == 0 {
 		cfg.MaxOpenConns = dbspi.DefaultMaxOpenConns
 	}
@@ -786,36 +786,36 @@ func normalizeDbServerConfig(cfg dbspi.DbServerConfig) dbspi.DbServerConfig {
 	return cfg
 }
 
-func dbServerDSN(cfg dbspi.DbServerConfig) string {
+func dbServerDSN(cfg dbspi.ServerConfig) string {
 	if cfg.DSN != "" {
 		return cfg.DSN
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local", cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.DbName)
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local", cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.DatabaseName)
 }
 
-// WithModel implements dbspi.Db
-func (d *GormDb) WithModel(model any) dbspi.Db {
+// WithModel implements dbSession
+func (d *GormDb) WithModel(model any) dbSession {
 	return &GormDb{db: d.db.Model(model)}
 }
 
-// WithTable implements dbspi.Db
-func (d *GormDb) WithTableName(tableName string) dbspi.Db {
+// WithTable implements dbSession
+func (d *GormDb) WithTableName(tableName string) dbSession {
 	return &GormDb{db: d.db.Table(tableName)}
 }
 
-// Find implements dbspi.Db
-func (d *GormDb) Find(ctx context.Context, dest any, query dbspi.Query, pagenation dbspi.PaginationConfig) error {
+// Find implements dbSession
+func (d *GormDb) Find(ctx context.Context, dest any, query dbspi.Query, pagination dbspi.Pagination) error {
 	db := d.db.WithContext(ctx)
-	if pagenation != nil {
-		if pagenation.Limit() != nil {
-			db = db.Limit(*pagenation.Limit())
+	if pagination != nil {
+		if pagination.Limit() != nil {
+			db = db.Limit(*pagination.Limit())
 		}
-		if pagenation.Offset() != nil {
-			db = db.Offset(*pagenation.Offset())
+		if pagination.Offset() != nil {
+			db = db.Offset(*pagination.Offset())
 		}
-		if len(pagenation.Orders()) > 0 {
-			orders := make([]clause.OrderByColumn, 0, len(pagenation.Orders()))
-			for _, order := range pagenation.Orders() {
+		if len(pagination.Orders()) > 0 {
+			orders := make([]clause.OrderByColumn, 0, len(pagination.Orders()))
+			for _, order := range pagination.Orders() {
 				orders = append(orders, clause.OrderByColumn{
 					Column: clause.Column{Name: order.Column().Name(), Raw: true},
 					Desc:   order.Desc(),
@@ -843,7 +843,7 @@ func (d *GormDb) Find(ctx context.Context, dest any, query dbspi.Query, pagenati
 	return db.Find(dest).Error
 }
 
-// Count implements dbspi.Db
+// Count implements dbSession
 func (d *GormDb) Count(ctx context.Context, query dbspi.Query) (uint64, error) {
 	var count int64
 	db := d.db.WithContext(ctx)
@@ -855,38 +855,38 @@ func (d *GormDb) Count(ctx context.Context, query dbspi.Query) (uint64, error) {
 	return uint64(count), err
 }
 
-// Create implements dbspi.Db
+// Create implements dbSession
 func (d *GormDb) Create(ctx context.Context, entity dbspi.Entity) error {
 	err := d.db.WithContext(ctx).Create(entity).Error
 	return err
 }
 
-// Save implements dbspi.Db
+// Save implements dbSession
 func (d *GormDb) Save(ctx context.Context, entity dbspi.Entity) error {
 	err := d.db.WithContext(ctx).Save(entity).Error
 	return err
 }
 
-// Update implements dbspi.Db
+// Update implements dbSession
 func (d *GormDb) Update(ctx context.Context, entity dbspi.Entity) error {
 	err := d.db.WithContext(ctx).Model(entity).Updates(entity).Error
 	return err
 }
 
-// Delete implements dbspi.Db
+// Delete implements dbSession
 func (d *GormDb) Delete(ctx context.Context, entity dbspi.Entity) error {
 	err := d.db.WithContext(ctx).Delete(entity).Error
 	return err
 }
 
-// UpdateByQuery implements dbspi.Db
+// UpdateByQuery implements dbSession
 func (d *GormDb) UpdateByQuery(ctx context.Context, query dbspi.Query, updater dbspi.Updater) error {
 	db := d.db.WithContext(ctx)
 	gormClause := queryToGormClause(query)
 	if gormClause != nil {
 		db = db.Clauses(gormClause)
 	}
-	err := db.Updates(updater.Params()).Error
+	err := db.Updates(updater.Values()).Error
 	return err
 }
 
@@ -900,7 +900,7 @@ func (d *GormDb) DeleteByQuery(ctx context.Context, entity dbspi.Entity, query d
 	return err
 }
 
-// BatchCreate implements dbspi.Db
+// BatchCreate implements dbSession
 func (d *GormDb) BatchCreate(ctx context.Context, entities any, batchSize int) error {
 	if batchSize <= 0 {
 		batchSize = 1000
@@ -909,25 +909,25 @@ func (d *GormDb) BatchCreate(ctx context.Context, entities any, batchSize int) e
 	return err
 }
 
-// BatchSave implements dbspi.Db
+// BatchSave implements dbSession
 func (d *GormDb) BatchSave(ctx context.Context, entities any) error {
 	err := d.db.WithContext(ctx).Save(entities).Error
 	return err
 }
 
-// Raw implements dbspi.Db
+// Raw implements dbSession
 func (d *GormDb) Raw(ctx context.Context, dest any, sql string, args ...any) error {
 	err := d.db.WithContext(ctx).Raw(sql, args...).Scan(dest).Error
 	return err
 }
 
-// Exec implements dbspi.Db
+// Exec implements dbSession
 func (d *GormDb) Exec(ctx context.Context, sql string, args ...any) error {
 	err := d.db.WithContext(ctx).Exec(sql, args...).Error
 	return err
 }
 
-// FirstOrCreate implements dbspi.Db
+// FirstOrCreate implements dbSession
 func (d *GormDb) FirstOrCreate(ctx context.Context, entity dbspi.Entity, query dbspi.Query) error {
 	db := d.db.WithContext(ctx)
 	gormClause := queryToGormClause(query)
@@ -937,8 +937,8 @@ func (d *GormDb) FirstOrCreate(ctx context.Context, entity dbspi.Entity, query d
 	return db.FirstOrCreate(entity).Error
 }
 
-// Transaction implements dbspi.Db
-func (d *GormDb) Transaction(ctx context.Context, fn dbspi.TxFn) error {
+// Transaction implements dbSession
+func (d *GormDb) Transaction(ctx context.Context, fn transactionFunc) error {
 	return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		txDB := &GormDb{db: tx}
 		return fn(txDB)

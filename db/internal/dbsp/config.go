@@ -3,63 +3,71 @@ package dbsp
 import "github.com/MrMiaoMIMI/goshared/db/dbspi"
 
 var (
-	_ dbspi.PaginationConfig = (*PaginationConfig)(nil)
-	_ dbspi.OrderConfig      = (*OrderConfig)(nil)
+	_ dbspi.Pagination = (*Pagination)(nil)
+	_ dbspi.Order      = (*Order)(nil)
 )
 
-type PaginationConfig struct {
+type Pagination struct {
 	limit  *int
 	offset *int
-	orders []dbspi.OrderConfig
+	orders []dbspi.Order
 }
 
-func NewPaginationConfig() dbspi.PaginationConfig {
-	return &PaginationConfig{}
+func NewPagination() dbspi.Pagination {
+	return &Pagination{}
 }
 
-func (c *PaginationConfig) WithLimit(limit *int) dbspi.PaginationConfig {
+func (c *Pagination) WithLimit(limit *int) dbspi.Pagination {
 	c.limit = limit
 	return c
 }
 
-func (c *PaginationConfig) WithOffset(offset *int) dbspi.PaginationConfig {
+func (c *Pagination) WithOffset(offset *int) dbspi.Pagination {
 	c.offset = offset
 	return c
 }
 
-func (c *PaginationConfig) AppendOrder(order dbspi.OrderConfig) dbspi.PaginationConfig {
+func (c *Pagination) AppendOrder(order dbspi.Order) dbspi.Pagination {
 	c.orders = append(c.orders, order)
 	return c
 }
 
-func (c *PaginationConfig) Limit() *int {
+func (c *Pagination) Limit() *int {
 	return c.limit
 }
 
-func (c *PaginationConfig) Offset() *int {
+func (c *Pagination) Offset() *int {
 	return c.offset
 }
 
-func (c *PaginationConfig) Orders() []dbspi.OrderConfig {
+func (c *Pagination) Orders() []dbspi.Order {
 	return c.orders
 }
 
-type OrderConfig struct {
+type Order struct {
 	column dbspi.Column
 	desc   bool
 }
 
-func NewOrderConfig(column dbspi.Column, desc bool) dbspi.OrderConfig {
-	return &OrderConfig{
+func OrderBy(column dbspi.Column, desc bool) dbspi.Order {
+	return &Order{
 		column: column,
 		desc:   desc,
 	}
 }
 
-func (c *OrderConfig) Column() dbspi.Column {
+func Asc(column dbspi.Column) dbspi.Order {
+	return OrderBy(column, false)
+}
+
+func Desc(column dbspi.Column) dbspi.Order {
+	return OrderBy(column, true)
+}
+
+func (c *Order) Column() dbspi.Column {
 	return c.column
 }
 
-func (c *OrderConfig) Desc() bool {
+func (c *Order) Desc() bool {
 	return c.desc
 }

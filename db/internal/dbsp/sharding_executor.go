@@ -13,11 +13,11 @@ import (
 
 // ShardedExecutorConfig is the internal config for creating a sharded executor.
 type ShardedExecutorConfig struct {
-	Dbs            []dbspi.DbTarget
-	DbRule         dbspi.DbShardingRule
+	Dbs            []DatabaseTarget
+	DbRule         dbspi.DatabaseShardingRule
 	TableRule      dbspi.TableShardingRule
 	MaxConcurrency int
-	CommonFields   dbspi.CommonFieldOptions
+	CommonFields   dbspi.CommonFieldAutoFillOptions
 }
 
 // shardingKeyResolver auto-extracts sharding key column values from CRUD parameters.
@@ -30,7 +30,7 @@ type shardingKeyResolver struct {
 
 // buildShardingKeyResolver creates a resolver from the sharding rules and entity type.
 // Returns nil if any rule doesn't implement ShardingKeyColumnsProvider.
-func buildShardingKeyResolver(entityType reflect.Type, idColumnName string, dbRule dbspi.DbShardingRule, tableRule dbspi.TableShardingRule) *shardingKeyResolver {
+func buildShardingKeyResolver(entityType reflect.Type, idColumnName string, dbRule dbspi.DatabaseShardingRule, tableRule dbspi.TableShardingRule) *shardingKeyResolver {
 	seen := make(map[string]bool)
 	var requiredCols []string
 
@@ -161,7 +161,7 @@ func (r *shardingKeyResolver) buildShardingKey(columns map[string]any, rangeCols
 	}
 	sk := dbspi.NewShardingKey()
 	for _, col := range r.requiredCols {
-		sk.SetVal(col, columns[col])
+		sk.SetValue(col, columns[col])
 	}
 	return sk, nil
 }
@@ -209,7 +209,7 @@ func deduplicateValues(values []any) []any {
 // without looking up the actual Db instance. Used for same-target validation.
 func (e *shardedExecutor[T]) resolveTarget(sk *dbspi.ShardingKey) (dbKey string, tableName string, err error) {
 	if e.dbRule != nil {
-		dbKey, err = e.dbRule.ResolveDbKey(sk)
+		dbKey, err = e.dbRule.ResolveDatabaseTargetKey(sk)
 		if err != nil {
 			return "", "", fmt.Errorf("resolve db key failed: %w", err)
 		}
@@ -263,7 +263,7 @@ func (e *shardedExecutor[T]) reduceColumns(multiCols map[string][]any) (map[stri
 	// Build reference ShardingKey with first values and resolve the reference target
 	refSk := dbspi.NewShardingKey()
 	for _, col := range e.keyResolver.requiredCols {
-		refSk.SetVal(col, result[col])
+		refSk.SetValue(col, result[col])
 	}
 	refDbKey, refTable, err := e.resolveTarget(refSk)
 	if err != nil {
@@ -276,9 +276,9 @@ func (e *shardedExecutor[T]) reduceColumns(multiCols map[string][]any) (map[stri
 			altSk := dbspi.NewShardingKey()
 			for _, reqCol := range e.keyResolver.requiredCols {
 				if reqCol == mvc.name {
-					altSk.SetVal(reqCol, altVal)
+					altSk.SetValue(reqCol, altVal)
 				} else {
-					altSk.SetVal(reqCol, result[reqCol])
+					altSk.SetValue(reqCol, result[reqCol])
 				}
 			}
 			altDbKey, altTable, err := e.resolveTarget(altSk)
@@ -312,17 +312,17 @@ func (e *shardedExecutor[T]) isRequiredColumn(col string) bool {
 
 type shardedExecutor[T dbspi.Entity] struct {
 	entity         T
-	dbs            []dbspi.DbTarget
-	dbRule         dbspi.DbShardingRule
+	dbs            []DatabaseTarget
+	dbRule         dbspi.DatabaseShardingRule
 	tableRule      dbspi.TableShardingRule
 	maxConcurrency int
 	keyResolver    *shardingKeyResolver
-	commonFields   dbspi.CommonFieldOptions
+	commonFields   dbspi.CommonFieldAutoFillOptions
 }
 
 func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *shardedExecutor[T] {
 	if len(cfg.Dbs) == 0 {
-		panic("sharded executor requires at least one DbTarget via WithDbs")
+		panic("sharded executor requires at least one DatabaseTarget via WithDbs")
 	}
 	if cfg.TableRule == nil && cfg.DbRule == nil {
 		panic("sharded executor requires at least one of WithTableRule or WithDbRule")
@@ -356,21 +356,21 @@ func toEnhancedExecutor[T dbspi.Entity](exec dbspi.Executor[T]) (dbspi.EnhancedE
 }
 
 // findDb looks up the Db by matching the target key string.
-func (e *shardedExecutor[T]) findDb(targetKey string) (dbspi.Db, error) {
+func (e *shardedExecutor[T]) findDb(targetKey string) (dbSession, error) {
 	for _, dt := range e.dbs {
 		if dt.Key == targetKey {
 			return dt.Db, nil
 		}
 	}
-	return nil, fmt.Errorf("no DbTarget found for key: %s", targetKey)
+	return nil, fmt.Errorf("no DatabaseTarget found for key: %s", targetKey)
 }
 
 // resolve determines the target Db and physical table name for the given ShardingKey.
-func (e *shardedExecutor[T]) resolve(sk *dbspi.ShardingKey) (dbspi.Db, string, error) {
-	var db dbspi.Db
+func (e *shardedExecutor[T]) resolve(sk *dbspi.ShardingKey) (dbSession, string, error) {
+	var db dbSession
 
 	if e.dbRule != nil {
-		targetKey, err := e.dbRule.ResolveDbKey(sk)
+		targetKey, err := e.dbRule.ResolveDatabaseTargetKey(sk)
 		if err != nil {
 			return nil, "", fmt.Errorf("resolve db key failed: %w", err)
 		}
@@ -406,7 +406,7 @@ func (e *shardedExecutor[T]) resolveExecutor(sk *dbspi.ShardingKey) (dbspi.Execu
 // resolveFromCtx extracts the ShardingKey from context and resolves the executor.
 // This is the fallback for methods where auto-extraction is not possible (Raw, Exec).
 func (e *shardedExecutor[T]) resolveFromCtx(ctx context.Context) (dbspi.Executor[T], error) {
-	sk, ok := dbspi.ShardingKeyFromCtx(ctx)
+	sk, ok := dbspi.ShardingKeyFromContext(ctx)
 	if !ok {
 		return nil, dbspi.ErrShardingKeyRequired
 	}
@@ -416,7 +416,7 @@ func (e *shardedExecutor[T]) resolveFromCtx(ctx context.Context) (dbspi.Executor
 // resolveForEntity resolves by aggregating ctx key + entity struct fields,
 // then validating all values route to the same target.
 func (e *shardedExecutor[T]) resolveForEntity(ctx context.Context, entity T) (dbspi.Executor[T], error) {
-	ctxSk, hasCtx := dbspi.ShardingKeyFromCtx(ctx)
+	ctxSk, hasCtx := dbspi.ShardingKeyFromContext(ctx)
 	if hasCtx && e.keyResolver == nil {
 		return e.resolveExecutor(ctxSk)
 	}
@@ -442,7 +442,7 @@ func (e *shardedExecutor[T]) resolveForEntity(ctx context.Context, entity T) (db
 // resolveForId resolves by aggregating ctx key + id parameter,
 // then validating all values route to the same target.
 func (e *shardedExecutor[T]) resolveForId(ctx context.Context, id any) (dbspi.Executor[T], error) {
-	ctxSk, hasCtx := dbspi.ShardingKeyFromCtx(ctx)
+	ctxSk, hasCtx := dbspi.ShardingKeyFromContext(ctx)
 	if hasCtx && e.keyResolver == nil {
 		return e.resolveExecutor(ctxSk)
 	}
@@ -468,7 +468,7 @@ func (e *shardedExecutor[T]) resolveForId(ctx context.Context, id any) (dbspi.Ex
 // resolveForQuery resolves by aggregating ctx key + query conditions,
 // then validating all values route to the same target.
 func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Query) (dbspi.Executor[T], error) {
-	ctxSk, hasCtx := dbspi.ShardingKeyFromCtx(ctx)
+	ctxSk, hasCtx := dbspi.ShardingKeyFromContext(ctx)
 	if hasCtx && e.keyResolver == nil {
 		return e.resolveExecutor(ctxSk)
 	}
@@ -493,7 +493,7 @@ func (e *shardedExecutor[T]) resolveForQuery(ctx context.Context, query dbspi.Qu
 // resolveForEntityAndQuery resolves by aggregating ctx key + entity + query,
 // then validating all values route to the same target.
 func (e *shardedExecutor[T]) resolveForEntityAndQuery(ctx context.Context, entity T, query dbspi.Query) (dbspi.Executor[T], error) {
-	ctxSk, hasCtx := dbspi.ShardingKeyFromCtx(ctx)
+	ctxSk, hasCtx := dbspi.ShardingKeyFromContext(ctx)
 	if hasCtx && e.keyResolver == nil {
 		return e.resolveExecutor(ctxSk)
 	}
@@ -575,7 +575,7 @@ func (e *shardedExecutor[T]) SoftDeleteById(ctx context.Context, id any) error {
 	return enhanced.SoftDeleteById(ctx, id)
 }
 
-func (e *shardedExecutor[T]) RecoverFromDeletedById(ctx context.Context, id any) error {
+func (e *shardedExecutor[T]) RestoreById(ctx context.Context, id any) error {
 	exec, err := e.resolveForId(ctx, id)
 	if err != nil {
 		return err
@@ -584,10 +584,10 @@ func (e *shardedExecutor[T]) RecoverFromDeletedById(ctx context.Context, id any)
 	if err != nil {
 		return err
 	}
-	return enhanced.RecoverFromDeletedById(ctx, id)
+	return enhanced.RestoreById(ctx, id)
 }
 
-func (e *shardedExecutor[T]) ExistsByIdWithoutDeleted(ctx context.Context, id any) (bool, T, error) {
+func (e *shardedExecutor[T]) ExistsByIdNotDeleted(ctx context.Context, id any) (bool, T, error) {
 	exec, err := e.resolveForId(ctx, id)
 	if err != nil {
 		var zero T
@@ -598,17 +598,17 @@ func (e *shardedExecutor[T]) ExistsByIdWithoutDeleted(ctx context.Context, id an
 		var zero T
 		return false, zero, err
 	}
-	return enhanced.ExistsByIdWithoutDeleted(ctx, id)
+	return enhanced.ExistsByIdNotDeleted(ctx, id)
 }
 
 // -- Query-based methods (resolve from ctx > query) --
 
-func (e *shardedExecutor[T]) Find(ctx context.Context, query dbspi.Query, pagenation dbspi.PaginationConfig) ([]T, error) {
+func (e *shardedExecutor[T]) Find(ctx context.Context, query dbspi.Query, pagination dbspi.Pagination) ([]T, error) {
 	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	return exec.Find(ctx, query, pagenation)
+	return exec.Find(ctx, query, pagination)
 }
 
 func (e *shardedExecutor[T]) Exists(ctx context.Context, query dbspi.Query) (bool, T, error) {
@@ -656,7 +656,7 @@ func (e *shardedExecutor[T]) SoftDeleteByQuery(ctx context.Context, query dbspi.
 	return enhanced.SoftDeleteByQuery(ctx, query)
 }
 
-func (e *shardedExecutor[T]) RecoverFromDeletedByQuery(ctx context.Context, query dbspi.Query) error {
+func (e *shardedExecutor[T]) RestoreByQuery(ctx context.Context, query dbspi.Query) error {
 	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		return err
@@ -665,10 +665,10 @@ func (e *shardedExecutor[T]) RecoverFromDeletedByQuery(ctx context.Context, quer
 	if err != nil {
 		return err
 	}
-	return enhanced.RecoverFromDeletedByQuery(ctx, query)
+	return enhanced.RestoreByQuery(ctx, query)
 }
 
-func (e *shardedExecutor[T]) FindWithoutDeleted(ctx context.Context, query dbspi.Query, pagenation dbspi.PaginationConfig) ([]T, error) {
+func (e *shardedExecutor[T]) FindNotDeleted(ctx context.Context, query dbspi.Query, pagination dbspi.Pagination) ([]T, error) {
 	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		return nil, err
@@ -677,10 +677,10 @@ func (e *shardedExecutor[T]) FindWithoutDeleted(ctx context.Context, query dbspi
 	if err != nil {
 		return nil, err
 	}
-	return enhanced.FindWithoutDeleted(ctx, query, pagenation)
+	return enhanced.FindNotDeleted(ctx, query, pagination)
 }
 
-func (e *shardedExecutor[T]) CountWithoutDeleted(ctx context.Context, query dbspi.Query) (uint64, error) {
+func (e *shardedExecutor[T]) CountNotDeleted(ctx context.Context, query dbspi.Query) (uint64, error) {
 	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		return 0, err
@@ -689,10 +689,10 @@ func (e *shardedExecutor[T]) CountWithoutDeleted(ctx context.Context, query dbsp
 	if err != nil {
 		return 0, err
 	}
-	return enhanced.CountWithoutDeleted(ctx, query)
+	return enhanced.CountNotDeleted(ctx, query)
 }
 
-func (e *shardedExecutor[T]) ExistsWithoutDeleted(ctx context.Context, query dbspi.Query) (bool, T, error) {
+func (e *shardedExecutor[T]) ExistsNotDeleted(ctx context.Context, query dbspi.Query) (bool, T, error) {
 	exec, err := e.resolveForQuery(ctx, query)
 	if err != nil {
 		var zero T
@@ -703,7 +703,7 @@ func (e *shardedExecutor[T]) ExistsWithoutDeleted(ctx context.Context, query dbs
 		var zero T
 		return false, zero, err
 	}
-	return enhanced.ExistsWithoutDeleted(ctx, query)
+	return enhanced.ExistsNotDeleted(ctx, query)
 }
 
 // -- Entity-based methods (resolve from ctx > entity) --
@@ -795,7 +795,7 @@ func (e *shardedExecutor[T]) Exec(ctx context.Context, sql string, args ...any) 
 
 // shardTarget represents a resolved (Db, TableName) pair for scatter-gather.
 type shardTarget struct {
-	db        dbspi.Db
+	db        dbSession
 	tableName string
 }
 
@@ -899,9 +899,9 @@ func (e *shardedExecutor[T]) fetchAllFromShard(ctx context.Context, exec dbspi.E
 			}
 		}
 
-		pagination := NewPaginationConfig().
+		pagination := NewPagination().
 			WithLimit(&batchSize).
-			AppendOrder(NewOrderConfig(idColumn, false))
+			AppendOrder(OrderBy(idColumn, false))
 
 		rows, err := exec.Find(ctx, batchQuery, pagination)
 		if err != nil {

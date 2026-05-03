@@ -18,8 +18,8 @@ type Value struct {
 	strVal string
 }
 
-func IntValue(v int64) Value   { return Value{kind: KindInt64, intVal: v} }
-func StrValue(v string) Value  { return Value{kind: KindString, strVal: v} }
+func IntValue(v int64) Value  { return Value{kind: KindInt64, intVal: v} }
+func StrValue(v string) Value { return Value{kind: KindString, strVal: v} }
 
 func (v Value) Kind() valueKind { return v.kind }
 func (v Value) IsInt() bool     { return v.kind == KindInt64 }

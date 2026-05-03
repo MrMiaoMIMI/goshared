@@ -40,12 +40,22 @@ func NewUpdater() dbspi.Updater {
 	return dbsp.NewUpdater()
 }
 
-// NewPaginationConfig creates a pagination config.
-func NewPaginationConfig() dbspi.PaginationConfig {
-	return dbsp.NewPaginationConfig()
+// NewPagination creates a pagination config.
+func NewPagination() dbspi.Pagination {
+	return dbsp.NewPagination()
 }
 
-// NewOrderConfig creates an order config.
-func NewOrderConfig(column dbspi.Column, desc bool) dbspi.OrderConfig {
-	return dbsp.NewOrderConfig(column, desc)
+// OrderBy creates an order config.
+func OrderBy(column dbspi.Column, desc bool) dbspi.Order {
+	return dbsp.OrderBy(column, desc)
+}
+
+// Asc creates an ascending order config.
+func Asc(column dbspi.Column) dbspi.Order {
+	return dbsp.Asc(column)
+}
+
+// Desc creates a descending order config.
+func Desc(column dbspi.Column) dbspi.Order {
+	return dbsp.Desc(column)
 }

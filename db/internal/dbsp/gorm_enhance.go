@@ -16,57 +16,57 @@ func NewDefaultDeletedFiled() dbspi.Field[bool] {
 
 // SoftDeleteById implements dbspi.EnhancedExecutor
 func (e *GormExecutor[T]) SoftDeleteById(ctx context.Context, id any) error {
-	updater := NewUpdater().Add(e.getDeletedField(e.emptyEntityInstance), true)
+	updater := NewUpdater().Set(e.getDeletedField(e.emptyEntityInstance), true)
 	return e.UpdateById(ctx, id, updater)
 }
 
 // SoftDeleteByQuery implements dbspi.EnhancedExecutor
 func (e *GormExecutor[T]) SoftDeleteByQuery(ctx context.Context, query dbspi.Query) error {
-	updater := NewUpdater().Add(e.getDeletedField(e.emptyEntityInstance), true)
+	updater := NewUpdater().Set(e.getDeletedField(e.emptyEntityInstance), true)
 	return e.UpdateByQuery(ctx, query, updater)
 }
 
-// RecoverFromDeletedById implements dbspi.EnhancedExecutor
-func (e *GormExecutor[T]) RecoverFromDeletedById(ctx context.Context, id any) error {
-	updater := NewUpdater().Add(e.getDeletedField(e.emptyEntityInstance), false)
+// RestoreById implements dbspi.EnhancedExecutor
+func (e *GormExecutor[T]) RestoreById(ctx context.Context, id any) error {
+	updater := NewUpdater().Set(e.getDeletedField(e.emptyEntityInstance), false)
 	return e.UpdateById(ctx, id, updater)
 }
 
-// RecoverFromDeletedByQuery implements dbspi.EnhancedExecutor
-func (e *GormExecutor[T]) RecoverFromDeletedByQuery(ctx context.Context, query dbspi.Query) error {
-	updater := NewUpdater().Add(e.getDeletedField(e.emptyEntityInstance), false)
+// RestoreByQuery implements dbspi.EnhancedExecutor
+func (e *GormExecutor[T]) RestoreByQuery(ctx context.Context, query dbspi.Query) error {
+	updater := NewUpdater().Set(e.getDeletedField(e.emptyEntityInstance), false)
 	return e.UpdateByQuery(ctx, query, updater)
 }
 
-// FindWithoutDeleted implements dbspi.EnhancedExecutor
-func (e *GormExecutor[T]) FindWithoutDeleted(ctx context.Context, query dbspi.Query, pagenation dbspi.PaginationConfig) ([]T, error) {
-	return e.Find(ctx, e.withNotDeleted(query), pagenation)
+// FindNotDeleted implements dbspi.EnhancedExecutor
+func (e *GormExecutor[T]) FindNotDeleted(ctx context.Context, query dbspi.Query, pagination dbspi.Pagination) ([]T, error) {
+	return e.Find(ctx, e.withNotDeleted(query), pagination)
 }
 
-// CountWithoutDeleted implements dbspi.EnhancedExecutor
-func (e *GormExecutor[T]) CountWithoutDeleted(ctx context.Context, query dbspi.Query) (uint64, error) {
+// CountNotDeleted implements dbspi.EnhancedExecutor
+func (e *GormExecutor[T]) CountNotDeleted(ctx context.Context, query dbspi.Query) (uint64, error) {
 	return e.Count(ctx, e.withNotDeleted(query))
 }
 
-// ExistsByIdWithoutDeleted implements dbspi.EnhancedExecutor
-func (e *GormExecutor[T]) ExistsByIdWithoutDeleted(ctx context.Context, id any) (bool, T, error) {
+// ExistsByIdNotDeleted implements dbspi.EnhancedExecutor
+func (e *GormExecutor[T]) ExistsByIdNotDeleted(ctx context.Context, id any) (bool, T, error) {
 	var entity T
 	if id == nil {
 		return false, entity, nil
 	}
-	return e.ExistsWithoutDeleted(ctx, e.buildQueryById(id))
+	return e.ExistsNotDeleted(ctx, e.buildQueryById(id))
 }
 
-// ExistsWithoutDeleted implements dbspi.EnhancedExecutor
-func (e *GormExecutor[T]) ExistsWithoutDeleted(ctx context.Context, query dbspi.Query) (bool, T, error) {
+// ExistsNotDeleted implements dbspi.EnhancedExecutor
+func (e *GormExecutor[T]) ExistsNotDeleted(ctx context.Context, query dbspi.Query) (bool, T, error) {
 	return e.Exists(ctx, e.withNotDeleted(query))
 }
 
 // getDeletedField returns the deleted field from the entity instance.
-// If the entity instance implements DeletedFieldNamer interface, it returns the deleted field name from the interface.
+// If the entity instance implements SoftDeleteFieldNamer interface, it returns the deleted field name from the interface.
 // Otherwise, it returns the default deleted field name.
 func (e *GormExecutor[T]) getDeletedField(entity dbspi.Entity) dbspi.Field[bool] {
-	if namer, ok := entity.(dbspi.DeletedFieldNamer); ok {
+	if namer, ok := entity.(dbspi.SoftDeleteFieldNamer); ok {
 		return NewField[bool](namer.DeletedFieldName())
 	}
 	return NewDefaultDeletedFiled()

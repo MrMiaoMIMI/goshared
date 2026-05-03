@@ -4,7 +4,7 @@ import (
 	"github.com/MrMiaoMIMI/goshared/db/dbspi"
 )
 
-// ManagerOption configures a DbManager created by NewDbManager.
+// ManagerOption configures a Manager created by NewManager.
 //
 // ManagerOption is sealed to this package. Use the WithXxx helpers in dbhelper
 // instead of implementing this interface directly.
@@ -12,12 +12,12 @@ type ManagerOption interface {
 	applyManagerOption(*managerOptions)
 }
 
-// ForOption configures an Executor created by For or ForEnhance.
+// ExecutorOption configures an Executor created by NewExecutor or NewEnhancedExecutor.
 //
-// ForOption is sealed to this package. Use the WithXxx helpers in dbhelper
+// ExecutorOption is sealed to this package. Use the WithXxx helpers in dbhelper
 // instead of implementing this interface directly.
-type ForOption interface {
-	applyForOption(*forOptions)
+type ExecutorOption interface {
+	applyExecutorOption(*executorOptions)
 }
 
 // TransactionOption configures a transaction created by Transaction.
@@ -28,17 +28,18 @@ type TransactionOption interface {
 	applyTransactionOption(*transactionOptions)
 }
 
-// CommonFieldOption can be used both as a DbManager global option and as a
-// per-table For/ForEnhance/ForTx override.
+// CommonFieldOption can be used both as a Manager global option and as a
+// per-table NewExecutor/NewEnhancedExecutor override.
 type CommonFieldOption interface {
 	ManagerOption
-	ForOption
+	ExecutorOption
 	TransactionOption
 }
 
-// DbManagerOption selects the DbManager used by For/ForEnhance or Transaction.
-type DbManagerOption interface {
-	ForOption
+// UseManagerOption selects the Manager used by NewExecutor, NewEnhancedExecutor,
+// or Transaction.
+type UseManagerOption interface {
+	ExecutorOption
 	TransactionOption
 }
 
@@ -46,16 +47,18 @@ type managerOptions struct {
 	commonFields commonFieldPatch
 }
 
-type forOptions struct {
-	manager      dbspi.DbManager
+type executorOptions struct {
+	manager      dbspi.Manager
+	tx           *Tx
+	setTx        bool
 	commonFields commonFieldPatch
 }
 
 type transactionOptions struct {
-	manager      dbspi.DbManager
-	dbKey        string
-	shardingKey  *dbspi.ShardingKey
-	commonFields commonFieldPatch
+	manager          dbspi.Manager
+	databaseGroupKey string
+	shardingKey      *dbspi.ShardingKey
+	commonFields     commonFieldPatch
 }
 
 type commonFieldPatch struct {
@@ -73,7 +76,7 @@ func (f commonFieldOptionFunc) applyManagerOption(o *managerOptions) {
 	f(&o.commonFields)
 }
 
-func (f commonFieldOptionFunc) applyForOption(o *forOptions) {
+func (f commonFieldOptionFunc) applyExecutorOption(o *executorOptions) {
 	f(&o.commonFields)
 }
 
@@ -81,16 +84,25 @@ func (f commonFieldOptionFunc) applyTransactionOption(o *transactionOptions) {
 	f(&o.commonFields)
 }
 
-type dbManagerOption struct {
-	manager dbspi.DbManager
+type managerSelectionOption struct {
+	manager dbspi.Manager
 }
 
-func (o dbManagerOption) applyForOption(opts *forOptions) {
+func (o managerSelectionOption) applyExecutorOption(opts *executorOptions) {
 	opts.manager = o.manager
 }
 
-func (o dbManagerOption) applyTransactionOption(opts *transactionOptions) {
+func (o managerSelectionOption) applyTransactionOption(opts *transactionOptions) {
 	opts.manager = o.manager
+}
+
+type txExecutorOption struct {
+	tx *Tx
+}
+
+func (o txExecutorOption) applyExecutorOption(opts *executorOptions) {
+	opts.tx = o.tx
+	opts.setTx = true
 }
 
 type transactionOptionFunc func(*transactionOptions)
@@ -99,8 +111,8 @@ func (f transactionOptionFunc) applyTransactionOption(o *transactionOptions) {
 	f(o)
 }
 
-// WithCommonFields enables or disables common-field autofill.
-func WithCommonFields(enabled bool) CommonFieldOption {
+// WithCommonFieldAutoFill enables or disables common-field autofill.
+func WithCommonFieldAutoFill(enabled bool) CommonFieldOption {
 	return commonFieldOptionFunc(func(p *commonFieldPatch) {
 		p.setEnabled = true
 		p.enabled = enabled
@@ -134,18 +146,31 @@ func WithCommonFieldOperatorProvider(provider dbspi.OperatorProvider) CommonFiel
 	})
 }
 
-// WithDbManager makes For/ForEnhance/Transaction use the given DbManager
-// instead of the global default manager.
-func WithDbManager(mgr dbspi.DbManager) DbManagerOption {
-	return dbManagerOption{manager: mgr}
+// WithManager makes NewExecutor/NewEnhancedExecutor/Transaction use the given
+// Manager instead of the global default manager.
+func WithManager(mgr dbspi.Manager) UseManagerOption {
+	return managerSelectionOption{manager: mgr}
 }
 
-// WithTxDbKey selects the database group used by a transaction.
+// WithTx makes NewExecutor/NewEnhancedExecutor run on tx.
 //
-// If omitted, Transaction uses dbspi.DefaultDbKey.
-func WithTxDbKey(dbKey string) TransactionOption {
+// If WithTx and WithManager are both provided to an executor factory, WithTx
+// takes precedence because a Tx is already bound to the Manager selected when
+// Transaction started.
+//
+// Invalid transaction state, such as a nil Tx or a database group mismatch, is
+// reported by the returned executor's methods because NewExecutor itself does
+// not return an error.
+func WithTx(tx *Tx) ExecutorOption {
+	return txExecutorOption{tx: tx}
+}
+
+// WithTxDatabaseGroupKey selects the database group used by a transaction.
+//
+// If omitted, Transaction uses dbspi.DefaultDatabaseGroupKey.
+func WithTxDatabaseGroupKey(databaseGroupKey string) TransactionOption {
 	return transactionOptionFunc(func(o *transactionOptions) {
-		o.dbKey = dbKey
+		o.databaseGroupKey = databaseGroupKey
 	})
 }
 
@@ -158,9 +183,9 @@ func WithTxShardingKey(key *dbspi.ShardingKey) TransactionOption {
 	})
 }
 
-func (p commonFieldPatch) apply(base dbspi.CommonFieldOptions) dbspi.CommonFieldOptions {
+func (p commonFieldPatch) apply(base dbspi.CommonFieldAutoFillOptions) dbspi.CommonFieldAutoFillOptions {
 	if p.setEnabled {
-		base.Enabled = p.enabled
+		base.AutoFillEnabled = p.enabled
 	}
 	if p.setOverwriteExplicitValues {
 		base.OverwriteExplicitValues = p.overwriteExplicitValues

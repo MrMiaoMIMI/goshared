@@ -36,8 +36,8 @@ func TestExprDbRuleRegion(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		sk := dbspi.NewShardingKey().SetVal("region", tt.region)
-		got, err := rule.ResolveDbKey(sk)
+		sk := dbspi.NewShardingKey().SetValue("region", tt.region)
+		got, err := rule.ResolveDatabaseTargetKey(sk)
 		if err != nil {
 			t.Fatalf("region=%s: %v", tt.region, err)
 		}
@@ -96,8 +96,8 @@ func TestExprDbRuleHashMod(t *testing.T) {
 
 	rule := NewExprDbRule(tmpl, expands)
 
-	sk := dbspi.NewShardingKey().SetVal("shop_id", int64(42))
-	got, err := rule.ResolveDbKey(sk)
+	sk := dbspi.NewShardingKey().SetValue("shop_id", int64(42))
+	got, err := rule.ResolveDatabaseTargetKey(sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestExprTableRuleResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sk := dbspi.NewShardingKey().SetVal("shop_id", int64(123456789))
+	sk := dbspi.NewShardingKey().SetValue("shop_id", int64(123456789))
 	got, err := rule.ResolveTable("order_tab", sk)
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestExprDbRuleNilKey(t *testing.T) {
 	})
 	rule := NewExprDbRule(tmpl, expands)
 
-	_, err := rule.ResolveDbKey(nil)
+	_, err := rule.ResolveDatabaseTargetKey(nil)
 	if err != dbspi.ErrShardingKeyRequired {
 		t.Fatalf("expected ErrShardingKeyRequired, got %v", err)
 	}
@@ -331,8 +331,8 @@ func TestExprDbRuleMissingColumn(t *testing.T) {
 	})
 	rule := NewExprDbRule(tmpl, expands)
 
-	sk := dbspi.NewShardingKey().SetVal("shop_id", int64(123))
-	_, err := rule.ResolveDbKey(sk)
+	sk := dbspi.NewShardingKey().SetValue("shop_id", int64(123))
+	_, err := rule.ResolveDatabaseTargetKey(sk)
 	if err == nil {
 		t.Fatal("expected error for missing column @{region}")
 	}
@@ -350,7 +350,7 @@ func TestExprTableRule_TableVar_ResolveTable(t *testing.T) {
 	})
 	rule, _ := NewExprTableRule(tmpl, expands)
 
-	sk := dbspi.NewShardingKey().SetVal("shop_id", int64(5))
+	sk := dbspi.NewShardingKey().SetValue("shop_id", int64(5))
 	name, err := rule.ResolveTable("order_tab", sk)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -403,7 +403,7 @@ func TestExprTableRule_TableVar_BackwardCompatible(t *testing.T) {
 	})
 	rule, _ := NewExprTableRule(tmpl, expands)
 
-	sk := dbspi.NewShardingKey().SetVal("shop_id", int64(5))
+	sk := dbspi.NewShardingKey().SetValue("shop_id", int64(5))
 	name, err := rule.ResolveTable("order_tab", sk)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -967,7 +967,7 @@ func TestExprTableRuleSimpleHashMod(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sk := dbspi.NewShardingKey().SetVal("shop_id", int64(42))
+	sk := dbspi.NewShardingKey().SetValue("shop_id", int64(42))
 	got1, _ := rule.ResolveTable("order_tab", sk)
 	got2, _ := rule.ResolveTable("order_tab", sk)
 	if got1 != got2 {

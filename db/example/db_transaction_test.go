@@ -30,11 +30,11 @@ var ShopFields = struct {
 
 func Test_Transaction_MultiTable_Commit(t *testing.T) {
 	ctx := context.Background()
-	mgr := testDbManager(testDbName)
+	mgr := testManager(testDatabaseName)
 	ensureShopTable(t, ctx, mgr)
 
-	userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))
-	shopExec := dbhelper.For(&Shop{}, dbhelper.WithDbManager(mgr))
+	userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
+	shopExec := dbhelper.NewExecutor(&Shop{}, dbhelper.WithManager(mgr))
 
 	suffix := time.Now().UnixNano()
 	email := fmt.Sprintf("tx_commit_%d@example.com", suffix)
@@ -45,20 +45,14 @@ func Test_Transaction_MultiTable_Commit(t *testing.T) {
 	})
 
 	err := dbhelper.Transaction(ctx, func(tx *dbhelper.Tx) error {
-		txUserExec, err := dbhelper.ForTx(tx, &User{})
-		if err != nil {
-			return err
-		}
-		txShopExec, err := dbhelper.ForTx(tx, &Shop{})
-		if err != nil {
-			return err
-		}
+		txUserExec := dbhelper.NewExecutor(&User{}, dbhelper.WithTx(tx))
+		txShopExec := dbhelper.NewExecutor(&Shop{}, dbhelper.WithTx(tx))
 
 		if err := txUserExec.Create(ctx, &User{Name: "Tx Commit User", Email: email, Age: 20, Status: "active"}); err != nil {
 			return err
 		}
 		return txShopExec.Create(ctx, &Shop{Name: shopName, OwnerEmail: email})
-	}, dbhelper.WithDbManager(mgr))
+	}, dbhelper.WithManager(mgr))
 	requireNoError(t, err)
 
 	userExists, _, err := userExec.Exists(ctx, dbhelper.Q(NewUserFieldManager().Email.Eq(&email)))
@@ -75,11 +69,11 @@ func Test_Transaction_MultiTable_Commit(t *testing.T) {
 
 func Test_Transaction_MultiTable_Rollback(t *testing.T) {
 	ctx := context.Background()
-	mgr := testDbManager(testDbName)
+	mgr := testManager(testDatabaseName)
 	ensureShopTable(t, ctx, mgr)
 
-	userExec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))
-	shopExec := dbhelper.For(&Shop{}, dbhelper.WithDbManager(mgr))
+	userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
+	shopExec := dbhelper.NewExecutor(&Shop{}, dbhelper.WithManager(mgr))
 
 	suffix := time.Now().UnixNano()
 	email := fmt.Sprintf("tx_rollback_%d@example.com", suffix)
@@ -88,14 +82,8 @@ func Test_Transaction_MultiTable_Rollback(t *testing.T) {
 
 	rollbackErr := errors.New("rollback transaction")
 	err := dbhelper.Transaction(ctx, func(tx *dbhelper.Tx) error {
-		txUserExec, err := dbhelper.ForTx(tx, &User{})
-		if err != nil {
-			return err
-		}
-		txShopExec, err := dbhelper.ForTx(tx, &Shop{})
-		if err != nil {
-			return err
-		}
+		txUserExec := dbhelper.NewExecutor(&User{}, dbhelper.WithTx(tx))
+		txShopExec := dbhelper.NewExecutor(&Shop{}, dbhelper.WithTx(tx))
 
 		if err := txUserExec.Create(ctx, &User{Name: "Tx Rollback User", Email: email, Age: 20, Status: "active"}); err != nil {
 			return err
@@ -104,7 +92,7 @@ func Test_Transaction_MultiTable_Rollback(t *testing.T) {
 			return err
 		}
 		return rollbackErr
-	}, dbhelper.WithDbManager(mgr))
+	}, dbhelper.WithManager(mgr))
 	if !errors.Is(err, rollbackErr) {
 		t.Fatalf("transaction error = %v, want rollbackErr", err)
 	}
@@ -123,13 +111,13 @@ func Test_Transaction_MultiTable_Rollback(t *testing.T) {
 
 func Test_Transaction_ShardedSameDb(t *testing.T) {
 	ctx := context.Background()
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: defaultTestDatabaseEntry(),
-			"order_dbs":        orderShopTableEntry(10),
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: defaultTestDatabaseGroupConfig(),
+			"order_dbs":                   orderShopTableEntry(10),
 		},
 	})
-	orderExec := dbhelper.For(&Order{}, dbhelper.WithDbManager(mgr))
+	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
 
 	amount := time.Now().UnixNano()
 	shopID1 := int64(12345)
@@ -142,15 +130,12 @@ func Test_Transaction_ShardedSameDb(t *testing.T) {
 	})
 
 	err := dbhelper.Transaction(ctx, func(tx *dbhelper.Tx) error {
-		txOrderExec, err := dbhelper.ForTx(tx, &Order{})
-		if err != nil {
-			return err
-		}
+		txOrderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithTx(tx))
 		if err := txOrderExec.Create(ctx, &Order{ShopID: shopID1, Amount: amount}); err != nil {
 			return err
 		}
 		return txOrderExec.Create(ctx, &Order{ShopID: shopID2, Amount: amount})
-	}, dbhelper.WithDbManager(mgr), dbhelper.WithTxDbKey("order_dbs"))
+	}, dbhelper.WithManager(mgr), dbhelper.WithTxDatabaseGroupKey("order_dbs"))
 	requireNoError(t, err)
 
 	assertOrderExists(t, ctx, orderExec, shopID1, amount)
@@ -159,16 +144,16 @@ func Test_Transaction_ShardedSameDb(t *testing.T) {
 
 func Test_Transaction_DbShardCrossShardRejected(t *testing.T) {
 	ctx := context.Background()
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: defaultTestDatabaseEntry(),
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: defaultTestDatabaseGroupConfig(),
 			"order_dbs": {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
-				DbSharding: &dbspi.DbShardConfig{
+				DatabaseSharding: &dbspi.DatabaseShardingConfig{
 					NameExpr:    "order_db_${idx}",
 					ExpandExprs: []string{"${idx} := range(0, 2)", "${idx} = @{shop_id} % 2"},
 				},
-				TableSharding: &dbspi.TableShardConfig{
+				TableSharding: &dbspi.TableShardingConfig{
 					NameExpr:    "order_tab_${index}",
 					ExpandExprs: []string{"${idx} := range(0, 10)", "${idx} = @{shop_id} % 10", "${index} = fill(${idx}, 8)"},
 				},
@@ -178,18 +163,15 @@ func Test_Transaction_DbShardCrossShardRejected(t *testing.T) {
 
 	txKey := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	err := dbhelper.Transaction(ctx, func(tx *dbhelper.Tx) error {
-		txOrderExec, err := dbhelper.ForTx(tx, &Order{})
-		if err != nil {
-			return err
-		}
+		txOrderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithTx(tx))
 		return txOrderExec.Create(ctx, &Order{ShopID: 12344, Amount: time.Now().UnixNano()})
-	}, dbhelper.WithDbManager(mgr), dbhelper.WithTxDbKey("order_dbs"), dbhelper.WithTxShardingKey(txKey))
+	}, dbhelper.WithManager(mgr), dbhelper.WithTxDatabaseGroupKey("order_dbs"), dbhelper.WithTxShardingKey(txKey))
 	requireErrorContains(t, err, "cross-shard")
 }
 
-func ensureShopTable(t *testing.T, ctx context.Context, mgr dbspi.DbManager) {
+func ensureShopTable(t *testing.T, ctx context.Context, mgr dbspi.Manager) {
 	t.Helper()
-	exec := dbhelper.For(&User{}, dbhelper.WithDbManager(mgr))
+	exec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
 	requireNoError(t, exec.Exec(ctx, `
 CREATE TABLE IF NOT EXISTS shop_tab (
 	id BIGINT NOT NULL AUTO_INCREMENT,

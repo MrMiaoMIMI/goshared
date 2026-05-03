@@ -2,23 +2,23 @@ package dbspi
 
 // DatabaseConfig is the top-level configuration for all databases.
 // It maps database group names to their connection and sharding configurations.
-// Entities without DbKeyProvider use DefaultDbKey.
+// Entities without DatabaseGroupKeyProvider use DefaultDatabaseGroupKey.
 type DatabaseConfig struct {
-	Databases map[string]DatabaseEntry `yaml:"databases" json:"databases"`
+	DatabaseGroups map[string]DatabaseGroupConfig `yaml:"database_groups" json:"database_groups"`
 }
 
-// DatabaseEntry configures a single database or a sharded database group.
-type DatabaseEntry struct {
+// DatabaseGroupConfig configures a single database or a sharded database group.
+type DatabaseGroupConfig struct {
 	// Connection: DSN string (takes precedence over individual fields).
 	DSN string `yaml:"dsn" json:"dsn"`
 
 	// Connection: individual fields.
-	Host     string `yaml:"host" json:"host"`
-	Port     uint   `yaml:"port" json:"port"`
-	User     string `yaml:"user" json:"user"`
-	Password string `yaml:"password" json:"password"`
-	DbName   string `yaml:"db_name" json:"db_name"`
-	Debug    bool   `yaml:"debug" json:"debug"`
+	Host         string `yaml:"host" json:"host"`
+	Port         uint   `yaml:"port" json:"port"`
+	User         string `yaml:"user" json:"user"`
+	Password     string `yaml:"password" json:"password"`
+	DatabaseName string `yaml:"database_name" json:"database_name"`
+	Debug        bool   `yaml:"debug" json:"debug"`
 
 	// Connection pool.
 	// Zero values use DefaultMaxOpenConns, DefaultMaxIdleConns, and
@@ -28,43 +28,43 @@ type DatabaseEntry struct {
 	ConnMaxLifetimeSeconds int `yaml:"conn_max_lifetime_seconds" json:"conn_max_lifetime_seconds"`
 
 	// Database-level sharding (expression-based).
-	DbSharding *DbShardConfig `yaml:"db_sharding" json:"db_sharding"`
+	DatabaseSharding *DatabaseShardingConfig `yaml:"database_sharding" json:"database_sharding"`
 
 	// Default table-level sharding (expression-based).
-	// Can be overridden per entity via EntityRules.
-	TableSharding *TableShardConfig `yaml:"table_sharding" json:"table_sharding"`
+	// Can be overridden per entity via TableRules.
+	TableSharding *TableShardingConfig `yaml:"table_sharding" json:"table_sharding"`
 
-	// Per-entity table sharding overrides.
-	EntityRules []EntityRule `yaml:"entity_rules" json:"entity_rules"`
+	// Per-table sharding overrides.
+	TableRules []TableRule `yaml:"table_rules" json:"table_rules"`
 
 	// Multi-server configuration.
-	Servers []NamedDbServerConfig `yaml:"servers" json:"servers"`
+	Servers []NamedServerConfig `yaml:"servers" json:"servers"`
 
 	// Max concurrent goroutines for scatter-gather.
 	MaxConcurrency int `yaml:"max_concurrency" json:"max_concurrency"`
 }
 
-// EntityRule defines a table sharding override for a group of tables.
-type EntityRule struct {
+// TableRule defines a table sharding override for a group of tables.
+type TableRule struct {
 	// Tables lists the logical table names this rule applies to.
 	Tables []string `yaml:"tables" json:"tables"`
 
 	// TableSharding overrides the database-level default for these tables.
-	TableSharding *TableShardConfig `yaml:"table_sharding" json:"table_sharding"`
+	TableSharding *TableShardingConfig `yaml:"table_sharding" json:"table_sharding"`
 
 	// MaxConcurrency overrides the database-level default.
 	MaxConcurrency *int `yaml:"max_concurrency" json:"max_concurrency"`
 }
 
-// DbServerConfig configures a database server connection.
-type DbServerConfig struct {
-	DSN      string `yaml:"dsn" json:"dsn"`
-	Host     string `yaml:"host" json:"host"`
-	Port     uint   `yaml:"port" json:"port"`
-	User     string `yaml:"user" json:"user"`
-	Password string `yaml:"password" json:"password"`
-	DbName   string `yaml:"db_name" json:"db_name"`
-	Debug    bool   `yaml:"debug" json:"debug"`
+// ServerConfig configures a database server connection.
+type ServerConfig struct {
+	DSN          string `yaml:"dsn" json:"dsn"`
+	Host         string `yaml:"host" json:"host"`
+	Port         uint   `yaml:"port" json:"port"`
+	User         string `yaml:"user" json:"user"`
+	Password     string `yaml:"password" json:"password"`
+	DatabaseName string `yaml:"database_name" json:"database_name"`
+	Debug        bool   `yaml:"debug" json:"debug"`
 
 	// Zero values use DefaultMaxOpenConns, DefaultMaxIdleConns, and
 	// DefaultConnMaxLifetimeSeconds.
@@ -73,14 +73,14 @@ type DbServerConfig struct {
 	ConnMaxLifetimeSeconds int `yaml:"conn_max_lifetime_seconds" json:"conn_max_lifetime_seconds"`
 }
 
-// NamedDbServerConfig extends DbServerConfig with a routing key for multi-server setups.
-type NamedDbServerConfig struct {
-	DbServerConfig `yaml:",inline" json:",inline"`
-	Key            string `yaml:"key" json:"key"`
+// NamedServerConfig extends ServerConfig with a routing key for multi-server setups.
+type NamedServerConfig struct {
+	ServerConfig `yaml:",inline" json:",inline"`
+	Key          string `yaml:"key" json:"key"`
 }
 
-// DbShardConfig configures database-level sharding via expressions.
-type DbShardConfig struct {
+// DatabaseShardingConfig configures database-level sharding via expressions.
+type DatabaseShardingConfig struct {
 	// NameExpr is the name template for the database name.
 	NameExpr string `yaml:"name_expr" json:"name_expr"`
 
@@ -88,8 +88,8 @@ type DbShardConfig struct {
 	ExpandExprs []string `yaml:"expand_exprs" json:"expand_exprs"`
 }
 
-// TableShardConfig configures table-level sharding via expressions.
-type TableShardConfig struct {
+// TableShardingConfig configures table-level sharding via expressions.
+type TableShardingConfig struct {
 	// NameExpr is the name template for the physical table name.
 	NameExpr string `yaml:"name_expr" json:"name_expr"`
 
@@ -97,26 +97,24 @@ type TableShardConfig struct {
 	ExpandExprs []string `yaml:"expand_exprs" json:"expand_exprs"`
 }
 
-// DbManager is an opaque database manager handle.
+// Manager is an opaque database manager handle returned by dbhelper.NewManager.
 //
-// Create one with dbhelper.NewDbManager, then pass it to dbhelper.For,
-// dbhelper.ForEnhance, or dbhelper.SetDefault. This interface is a public
-// handle for dbhelper-created managers; external implementations are not
-// supported by the default dbhelper executors.
-type DbManager interface {
-	DBManager()
+// Do not implement this interface directly. dbhelper only supports Manager
+// values returned by dbhelper.NewManager or dbhelper.DefaultManager.
+type Manager interface {
+	ManagerHandle()
 }
 
-type PaginationConfig interface {
-	WithLimit(limit *int) PaginationConfig
-	WithOffset(offset *int) PaginationConfig
-	AppendOrder(order OrderConfig) PaginationConfig
+type Pagination interface {
+	WithLimit(limit *int) Pagination
+	WithOffset(offset *int) Pagination
+	AppendOrder(order Order) Pagination
 	Limit() *int
 	Offset() *int
-	Orders() []OrderConfig
+	Orders() []Order
 }
 
-type OrderConfig interface {
+type Order interface {
 	Column() Column
 	Desc() bool
 }

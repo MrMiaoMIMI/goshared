@@ -55,27 +55,27 @@ type SelectQuery interface {
 
 // Updater is used to update the entity
 type Updater interface {
-	Add(column Column, value any) Updater
-	AddByMap(columnMap map[Column]any) Updater
+	Set(column Column, value any) Updater
+	SetMap(columnMap map[Column]any) Updater
 	Remove(column Column) Updater
-	Params() map[string]any
+	Values() map[string]any
 }
 
 type Entity interface {
 	TableName() string
 }
 
-// DbKeyProvider is an optional interface for entities to declare which
+// DatabaseGroupKeyProvider is an optional interface for entities to declare which
 // database configuration key they belong to.
-// Used by DbManager to route entities to the correct database/sharding group.
-// If not implemented, DefaultDbKey is used.
-type DbKeyProvider interface {
-	DbKey() string
+// Used by Manager to route entities to the correct database/sharding group.
+// If not implemented, DefaultDatabaseGroupKey is used.
+type DatabaseGroupKeyProvider interface {
+	DatabaseGroupKey() string
 }
 
 type Executor[T Entity] interface {
 	// Shard routes to a specific shard by the given ShardingKey.
-	// Returns the resolved Executor bound to the target Db and physical table.
+	// Returns the resolved Executor bound to the target database and physical table.
 	// For non-sharded Executor, this is a no-op and returns (self, nil).
 	Shard(key *ShardingKey) (Executor[T], error)
 
@@ -88,7 +88,7 @@ type Executor[T Entity] interface {
 	DeleteById(ctx context.Context, id any) error
 
 	// Common Methods
-	Find(ctx context.Context, query Query, pagenation PaginationConfig) ([]T, error)
+	Find(ctx context.Context, query Query, pagination Pagination) ([]T, error)
 	Exists(ctx context.Context, query Query) (bool, T, error)
 	Count(ctx context.Context, query Query) (uint64, error)
 	Create(ctx context.Context, entity T) error
@@ -116,32 +116,4 @@ type Executor[T Entity] interface {
 	// When batchSize <= 0, each shard is queried all at once (no batching).
 	FindAll(ctx context.Context, query Query, batchSize int) ([]T, error)
 	CountAll(ctx context.Context, query Query) (uint64, error)
-}
-
-// TxFn is a function that runs within a transaction.
-// If it returns an error, the transaction is rolled back; otherwise it is committed.
-type TxFn func(tx Db) error
-
-// Db is the interface for the database
-// Generally, you should not use Db methods directly, but use Executor methods instead
-type Db interface {
-	WithModel(entity any) Db
-	WithTableName(tableName string) Db
-	Find(ctx context.Context, dest any, query Query, pagenation PaginationConfig) error
-	Count(ctx context.Context, query Query) (uint64, error)
-	Create(ctx context.Context, entity Entity) error
-	Save(ctx context.Context, entity Entity) error
-	Update(ctx context.Context, entity Entity) error
-	Delete(ctx context.Context, entity Entity) error
-	BatchCreate(ctx context.Context, entities any, batchSize int) error
-	BatchSave(ctx context.Context, entities any) error
-	UpdateByQuery(ctx context.Context, query Query, updater Updater) error
-	DeleteByQuery(ctx context.Context, entity Entity, query Query) error
-	FirstOrCreate(ctx context.Context, entity Entity, query Query) error
-	Raw(ctx context.Context, dest any, sql string, args ...any) error
-	Exec(ctx context.Context, sql string, args ...any) error
-
-	// Transaction runs fn within a database transaction.
-	// The transaction is committed if fn returns nil; rolled back otherwise.
-	Transaction(ctx context.Context, fn TxFn) error
 }

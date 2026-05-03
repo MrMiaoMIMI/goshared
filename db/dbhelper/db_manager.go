@@ -5,43 +5,64 @@ import (
 	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp"
 )
 
-// NewDbManager creates a new DbManager from the given configuration.
-func NewDbManager(cfg dbspi.DatabaseConfig, opts ...ManagerOption) dbspi.DbManager {
+type managerHandle struct {
+	manager *dbsp.Manager
+}
+
+func (*managerHandle) ManagerHandle() {}
+
+func (m *managerHandle) internalManager() *dbsp.Manager {
+	if m == nil {
+		return nil
+	}
+	return m.manager
+}
+
+// NewManager creates a new Manager from the given configuration.
+func NewManager(cfg dbspi.DatabaseConfig, opts ...ManagerOption) dbspi.Manager {
 	options := resolveManagerOptions(opts)
-	commonFields := options.commonFields.apply(dbspi.DefaultCommonFieldOptions())
-	return dbsp.NewDbManager(cfg, commonFields)
+	commonFields := options.commonFields.apply(dbspi.DefaultCommonFieldAutoFillOptions())
+	return &managerHandle{manager: dbsp.NewManager(cfg, commonFields)}
 }
 
-// SetDefault sets the global default DbManager.
-func SetDefault(mgr dbspi.DbManager) {
-	dbsp.SetDefaultDbManager(asDbManager(mgr))
+// SetDefaultManager sets the global default Manager.
+func SetDefaultManager(mgr dbspi.Manager) {
+	dbsp.SetDefaultManager(asInternalManager(mgr))
 }
 
-// Default returns the global default DbManager.
-func Default() dbspi.DbManager {
-	return dbsp.DefaultDbManager()
+// DefaultManager returns the global default Manager.
+func DefaultManager() dbspi.Manager {
+	return &managerHandle{manager: dbsp.DefaultManager()}
 }
 
-// For creates an Executor for the given entity using the DbManager.
-func For[T dbspi.Entity](entity T, opts ...ForOption) dbspi.Executor[T] {
-	options := resolveForOptions(opts)
-	mgr := asDbManager(options.manager)
-	if mgr == nil {
-		mgr = dbsp.DefaultDbManager()
+// NewExecutor creates an Executor for the given entity using the Manager.
+func NewExecutor[T dbspi.Entity](entity T, opts ...ExecutorOption) dbspi.Executor[T] {
+	options := resolveExecutorOptions(opts)
+	if options.setTx {
+		return newTxExecutor(entity, options.tx, options.commonFields)
 	}
-	commonFields := options.commonFields.apply(mgr.CommonFieldOptions())
-	return dbsp.ForWithCommonFields(entity, mgr, commonFields)
+
+	mgr := asInternalManager(options.manager)
+	if mgr == nil {
+		mgr = dbsp.DefaultManager()
+	}
+	commonFields := options.commonFields.apply(mgr.CommonFieldAutoFillOptions())
+	return dbsp.ForWithCommonFieldAutoFill(entity, mgr, commonFields)
 }
 
-// ForEnhance creates an EnhancedExecutor for the given entity using the DbManager.
-func ForEnhance[T dbspi.Entity](entity T, opts ...ForOption) dbspi.EnhancedExecutor[T] {
-	options := resolveForOptions(opts)
-	mgr := asDbManager(options.manager)
-	if mgr == nil {
-		mgr = dbsp.DefaultDbManager()
+// NewEnhancedExecutor creates an EnhancedExecutor for the given entity using the Manager.
+func NewEnhancedExecutor[T dbspi.Entity](entity T, opts ...ExecutorOption) dbspi.EnhancedExecutor[T] {
+	options := resolveExecutorOptions(opts)
+	if options.setTx {
+		return newTxEnhancedExecutor(entity, options.tx, options.commonFields)
 	}
-	commonFields := options.commonFields.apply(mgr.CommonFieldOptions())
-	return dbsp.ForEnhanceWithCommonFields(entity, mgr, commonFields)
+
+	mgr := asInternalManager(options.manager)
+	if mgr == nil {
+		mgr = dbsp.DefaultManager()
+	}
+	commonFields := options.commonFields.apply(mgr.CommonFieldAutoFillOptions())
+	return dbsp.ForEnhanceWithCommonFieldAutoFill(entity, mgr, commonFields)
 }
 
 func resolveManagerOptions(opts []ManagerOption) managerOptions {
@@ -54,23 +75,28 @@ func resolveManagerOptions(opts []ManagerOption) managerOptions {
 	return options
 }
 
-func resolveForOptions(opts []ForOption) forOptions {
-	var options forOptions
+func resolveExecutorOptions(opts []ExecutorOption) executorOptions {
+	var options executorOptions
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyForOption(&options)
+			opt.applyExecutorOption(&options)
 		}
 	}
 	return options
 }
 
-func asDbManager(mgr dbspi.DbManager) *dbsp.DbManager {
+type managerUnwrapper interface {
+	dbspi.Manager
+	internalManager() *dbsp.Manager
+}
+
+func asInternalManager(mgr dbspi.Manager) *dbsp.Manager {
 	if mgr == nil {
 		return nil
 	}
-	internal, ok := mgr.(*dbsp.DbManager)
+	internal, ok := mgr.(managerUnwrapper)
 	if !ok {
-		panic("dbhelper: unsupported DbManager implementation")
+		panic("dbhelper: unsupported dbspi.Manager implementation; use dbhelper.NewManager")
 	}
-	return internal
+	return internal.internalManager()
 }

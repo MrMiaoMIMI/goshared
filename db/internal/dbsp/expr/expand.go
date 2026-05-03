@@ -9,7 +9,7 @@ import (
 type DeclKind int
 
 const (
-	DeclEnum  DeclKind = iota
+	DeclEnum DeclKind = iota
 	DeclRange
 )
 

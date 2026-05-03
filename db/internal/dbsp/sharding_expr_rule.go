@@ -10,7 +10,7 @@ import (
 // ================== Expression DB Rule ==================
 
 var (
-	_ dbspi.DbShardingRule            = (*exprDbRule)(nil)
+	_ dbspi.DatabaseShardingRule       = (*exprDbRule)(nil)
 	_ dbspi.ShardingKeyColumnsProvider = (*exprDbRule)(nil)
 )
 
@@ -24,7 +24,7 @@ func NewExprDbRule(tmpl *expr.Template, expands *expr.ExpandSet) *exprDbRule {
 	return &exprDbRule{tmpl: tmpl, expands: expands}
 }
 
-func (r *exprDbRule) ResolveDbKey(sk *dbspi.ShardingKey) (string, error) {
+func (r *exprDbRule) ResolveDatabaseTargetKey(sk *dbspi.ShardingKey) (string, error) {
 	if sk == nil {
 		return "", dbspi.ErrShardingKeyRequired
 	}
@@ -55,7 +55,7 @@ func (r *exprDbRule) buildContext(sk *dbspi.ShardingKey) (*expr.EvalContext, err
 }
 
 // EnumerateDbNames generates all possible db names from := declarations.
-// Used at startup to create DbTarget connections.
+// Used at startup to create DatabaseTarget connections.
 func (r *exprDbRule) EnumerateDbNames() ([]string, error) {
 	if len(r.expands.Decls) == 0 {
 		return nil, fmt.Errorf("no := declarations found for DB enumeration")

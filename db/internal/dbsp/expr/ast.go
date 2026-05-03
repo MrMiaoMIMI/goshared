@@ -31,9 +31,9 @@ type FuncCall struct {
 	Args []Expr
 }
 
-func (*IntLit) exprNode()    {}
-func (*StrLit) exprNode()    {}
-func (*ColRef) exprNode()    {}
-func (*VarRef) exprNode()    {}
-func (*BinaryOp) exprNode()  {}
-func (*FuncCall) exprNode()  {}
+func (*IntLit) exprNode()   {}
+func (*StrLit) exprNode()   {}
+func (*ColRef) exprNode()   {}
+func (*VarRef) exprNode()   {}
+func (*BinaryOp) exprNode() {}
+func (*FuncCall) exprNode() {}

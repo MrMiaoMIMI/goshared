@@ -11,7 +11,7 @@ import (
 type Func func(args []Value) (Value, error)
 
 var (
-	funcsMu   sync.RWMutex
+	funcsMu      sync.RWMutex
 	funcRegistry = map[string]Func{
 		"fill":   builtinFill,
 		"str":    builtinStr,

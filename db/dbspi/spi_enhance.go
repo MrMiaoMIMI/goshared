@@ -11,21 +11,21 @@ type EnhancedExecutor[T Entity] interface {
 	// SoftDelete is a method that sets the soft delete flag to true
 	SoftDeleteByQuery(ctx context.Context, query Query) error
 
-	// RecoverFromDeletedById is a method that sets the soft delete flag to false by id
-	RecoverFromDeletedById(ctx context.Context, id any) error
+	// RestoreById is a method that sets the soft delete flag to false by id
+	RestoreById(ctx context.Context, id any) error
 
-	// RecoverFromDeletedByQuery is a method that sets the soft delete flag to false by query
-	RecoverFromDeletedByQuery(ctx context.Context, query Query) error
+	// RestoreByQuery is a method that sets the soft delete flag to false by query
+	RestoreByQuery(ctx context.Context, query Query) error
 
-	// FindWithoutDeleted is a method that finds the entity without the soft delete flag
-	FindWithoutDeleted(ctx context.Context, query Query, pagenation PaginationConfig) ([]T, error)
+	// FindNotDeleted is a method that finds the entity without the soft delete flag
+	FindNotDeleted(ctx context.Context, query Query, pagination Pagination) ([]T, error)
 
-	// CountWithoutDeleted is a method that counts the entity without the soft delete flag
-	CountWithoutDeleted(ctx context.Context, query Query) (uint64, error)
+	// CountNotDeleted is a method that counts the entity without the soft delete flag
+	CountNotDeleted(ctx context.Context, query Query) (uint64, error)
 
-	// ExistsByIdWithoutDeleted is a method that checks if the entity exists without the soft delete flag by id
-	ExistsByIdWithoutDeleted(ctx context.Context, id any) (bool, T, error)
+	// ExistsByIdNotDeleted is a method that checks if the entity exists without the soft delete flag by id
+	ExistsByIdNotDeleted(ctx context.Context, id any) (bool, T, error)
 
-	// ExistsWithoutDeleted is a method that checks if the entity exists without the soft delete flag
-	ExistsWithoutDeleted(ctx context.Context, query Query) (bool, T, error)
+	// ExistsNotDeleted is a method that checks if the entity exists without the soft delete flag
+	ExistsNotDeleted(ctx context.Context, query Query) (bool, T, error)
 }

@@ -10,42 +10,42 @@ import (
 
 var shardingExecutorCache sync.Map
 
-func defaultTestDatabaseEntry() dbspi.DatabaseEntry {
-	return dbspi.DatabaseEntry{
+func defaultTestDatabaseGroupConfig() dbspi.DatabaseGroupConfig {
+	return dbspi.DatabaseGroupConfig{
 		Host:         testDbHost,
 		Port:         testDbPort,
 		User:         testDbUser,
 		Password:     testDbPassword,
-		DbName:       testAppDbName,
+		DatabaseName: testAppDatabaseName,
 		Debug:        testDebugMode,
 		MaxOpenConns: 2,
 		MaxIdleConns: 1,
 	}
 }
 
-func singleTestDatabaseEntry() dbspi.DatabaseEntry {
-	return dbspi.DatabaseEntry{
+func singleTestDatabaseGroupConfig() dbspi.DatabaseGroupConfig {
+	return dbspi.DatabaseGroupConfig{
 		Host:         testDbHost,
 		Port:         testDbPort,
 		User:         testDbUser,
 		Password:     testDbPassword,
-		DbName:       testDbName,
+		DatabaseName: testDatabaseName,
 		Debug:        testDebugMode,
 		MaxOpenConns: 2,
 		MaxIdleConns: 1,
 	}
 }
 
-func testNamedServer(key string) dbspi.NamedDbServerConfig {
-	return dbspi.NamedDbServerConfig{
+func testNamedServer(key string) dbspi.NamedServerConfig {
+	return dbspi.NamedServerConfig{
 		Key: key,
-		DbServerConfig: dbspi.DbServerConfig{
-			Host:     testDbHost,
-			Port:     testDbPort,
-			User:     testDbUser,
-			Password: testDbPassword,
-			DbName:   testDbName,
-			Debug:    testDebugMode,
+		ServerConfig: dbspi.ServerConfig{
+			Host:         testDbHost,
+			Port:         testDbPort,
+			User:         testDbUser,
+			Password:     testDbPassword,
+			DatabaseName: testDatabaseName,
+			Debug:        testDebugMode,
 
 			MaxOpenConns: 2,
 			MaxIdleConns: 1,
@@ -53,17 +53,17 @@ func testNamedServer(key string) dbspi.NamedDbServerConfig {
 	}
 }
 
-func managedExecutor[T dbspi.Entity](entity T, entry dbspi.DatabaseEntry) dbspi.Executor[T] {
-	mgr := dbhelper.NewDbManager(dbspi.DatabaseConfig{
-		Databases: map[string]dbspi.DatabaseEntry{
-			dbspi.DefaultDbKey: defaultTestDatabaseEntry(),
-			"order_dbs":        entry,
+func managedExecutor[T dbspi.Entity](entity T, entry dbspi.DatabaseGroupConfig) dbspi.Executor[T] {
+	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
+			dbspi.DefaultDatabaseGroupKey: defaultTestDatabaseGroupConfig(),
+			"order_dbs":                   entry,
 		},
 	})
-	return dbhelper.For(entity, dbhelper.WithDbManager(mgr))
+	return dbhelper.NewExecutor(entity, dbhelper.WithManager(mgr))
 }
 
-func cachedManagedExecutor[T dbspi.Entity](key string, entity T, entry dbspi.DatabaseEntry) dbspi.Executor[T] {
+func cachedManagedExecutor[T dbspi.Entity](key string, entity T, entry dbspi.DatabaseGroupConfig) dbspi.Executor[T] {
 	if cached, ok := shardingExecutorCache.Load(key); ok {
 		return cached.(dbspi.Executor[T])
 	}
@@ -72,22 +72,22 @@ func cachedManagedExecutor[T dbspi.Entity](key string, entity T, entry dbspi.Dat
 	return actual.(dbspi.Executor[T])
 }
 
-func tableShardConfig(nameExpr string, expandExprs ...string) *dbspi.TableShardConfig {
-	return &dbspi.TableShardConfig{
+func tableShardConfig(nameExpr string, expandExprs ...string) *dbspi.TableShardingConfig {
+	return &dbspi.TableShardingConfig{
 		NameExpr:    nameExpr,
 		ExpandExprs: expandExprs,
 	}
 }
 
-func dbShardConfig(nameExpr string, expandExprs ...string) *dbspi.DbShardConfig {
-	return &dbspi.DbShardConfig{
+func dbShardConfig(nameExpr string, expandExprs ...string) *dbspi.DatabaseShardingConfig {
+	return &dbspi.DatabaseShardingConfig{
 		NameExpr:    nameExpr,
 		ExpandExprs: expandExprs,
 	}
 }
 
-func orderShopTableEntry(count int) dbspi.DatabaseEntry {
-	entry := singleTestDatabaseEntry()
+func orderShopTableEntry(count int) dbspi.DatabaseGroupConfig {
+	entry := singleTestDatabaseGroupConfig()
 	entry.TableSharding = tableShardConfig(
 		"order_tab_${index}",
 		fmt.Sprintf("${idx} := range(0, %d)", count),
@@ -102,7 +102,7 @@ func newOrderShopTableExecutor(count int) dbspi.Executor[*Order] {
 }
 
 func newOrderIDTableExecutor(count int) dbspi.Executor[*Order] {
-	entry := singleTestDatabaseEntry()
+	entry := singleTestDatabaseGroupConfig()
 	entry.TableSharding = tableShardConfig(
 		"order_tab_${index}",
 		fmt.Sprintf("${idx} := range(0, %d)", count),
@@ -114,12 +114,12 @@ func newOrderIDTableExecutor(count int) dbspi.Executor[*Order] {
 
 func newOrderDbTableExecutor() dbspi.Executor[*Order] {
 	entry := orderShopTableEntry(10)
-	entry.Servers = []dbspi.NamedDbServerConfig{
+	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("0"),
 		testNamedServer("1"),
 	}
-	entry.DbName = ""
-	entry.DbSharding = dbShardConfig(
+	entry.DatabaseName = ""
+	entry.DatabaseSharding = dbShardConfig(
 		"${idx}",
 		"${idx} := range(0, 2)",
 		"${idx} = @{shop_id} % 2",
@@ -129,12 +129,12 @@ func newOrderDbTableExecutor() dbspi.Executor[*Order] {
 
 func newOrderNamedDbTableExecutor() dbspi.Executor[*Order] {
 	entry := orderShopTableEntry(10)
-	entry.Servers = []dbspi.NamedDbServerConfig{
+	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("order_SG_db"),
 		testNamedServer("order_TH_db"),
 	}
-	entry.DbName = ""
-	entry.DbSharding = dbShardConfig(
+	entry.DatabaseName = ""
+	entry.DatabaseSharding = dbShardConfig(
 		"order_${region}_db",
 		"${region} := enum(SG, TH)",
 		"${region} = @{region}",
@@ -143,13 +143,13 @@ func newOrderNamedDbTableExecutor() dbspi.Executor[*Order] {
 }
 
 func newOrderRegionDbExecutor() dbspi.Executor[*Order] {
-	entry := singleTestDatabaseEntry()
-	entry.Servers = []dbspi.NamedDbServerConfig{
+	entry := singleTestDatabaseGroupConfig()
+	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("order_SG_db"),
 		testNamedServer("order_TH_db"),
 	}
-	entry.DbName = ""
-	entry.DbSharding = dbShardConfig(
+	entry.DatabaseName = ""
+	entry.DatabaseSharding = dbShardConfig(
 		"order_${region}_db",
 		"${region} := enum(SG, TH)",
 		"${region} = @{region}",
@@ -158,13 +158,13 @@ func newOrderRegionDbExecutor() dbspi.Executor[*Order] {
 }
 
 func newRegionalOrderCompositeExecutor() dbspi.Executor[*RegionalOrder] {
-	entry := singleTestDatabaseEntry()
-	entry.Servers = []dbspi.NamedDbServerConfig{
+	entry := singleTestDatabaseGroupConfig()
+	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("SG"),
 		testNamedServer("TH"),
 	}
-	entry.DbName = ""
-	entry.DbSharding = dbShardConfig(
+	entry.DatabaseName = ""
+	entry.DatabaseSharding = dbShardConfig(
 		"${region}",
 		"${region} := enum(SG, TH)",
 		"${region} = @{region}",
@@ -179,13 +179,13 @@ func newRegionalOrderCompositeExecutor() dbspi.Executor[*RegionalOrder] {
 }
 
 func newOrderRegionRequiredExecutor() dbspi.Executor[*Order] {
-	entry := singleTestDatabaseEntry()
-	entry.Servers = []dbspi.NamedDbServerConfig{
+	entry := singleTestDatabaseGroupConfig()
+	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("SG"),
 		testNamedServer("TH"),
 	}
-	entry.DbName = ""
-	entry.DbSharding = dbShardConfig(
+	entry.DatabaseName = ""
+	entry.DatabaseSharding = dbShardConfig(
 		"${region}",
 		"${region} := enum(SG, TH)",
 		"${region} = @{region}",
@@ -200,7 +200,7 @@ func newOrderRegionRequiredExecutor() dbspi.Executor[*Order] {
 }
 
 func newTableVarExecutor[T dbspi.Entity](entity T, count int) dbspi.Executor[T] {
-	entry := singleTestDatabaseEntry()
+	entry := singleTestDatabaseGroupConfig()
 	entry.TableSharding = tableShardConfig(
 		"${table}_${index}",
 		fmt.Sprintf("${idx} := range(0, %d)", count),

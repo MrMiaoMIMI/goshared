@@ -28,8 +28,8 @@ func (sk *ShardingKey) Set(col Column, value any) *ShardingKey {
 	return sk
 }
 
-// SetVal stores a value under the given column name.
-func (sk *ShardingKey) SetVal(name string, value any) *ShardingKey {
+// SetValue stores a value under the given column name.
+func (sk *ShardingKey) SetValue(name string, value any) *ShardingKey {
 	sk.fields[name] = value
 	return sk
 }
@@ -48,21 +48,12 @@ func (sk *ShardingKey) Fields() map[string]any {
 	return sk.fields
 }
 
-// ================== DbTarget ==================
-
-// DbTarget binds a routing key to a Db instance.
-// The Key is matched against the string returned by DbShardingRule.ResolveDbKey.
-type DbTarget struct {
-	Key string
-	Db  Db
-}
-
 // ================== Sharding Rule Interfaces ==================
 
-// DbShardingRule resolves a ShardingKey to a target key string.
-// The returned string is matched against DbTarget.Key to determine which Db to use.
-type DbShardingRule interface {
-	ResolveDbKey(key *ShardingKey) (targetKey string, err error)
+// DatabaseShardingRule resolves a ShardingKey to a target key string.
+// The returned string is matched against the configured database target key.
+type DatabaseShardingRule interface {
+	ResolveDatabaseTargetKey(key *ShardingKey) (targetKey string, err error)
 }
 
 // TableShardingRule resolves the physical table name from the logical
@@ -100,8 +91,8 @@ func WithShardingKey(ctx context.Context, key *ShardingKey) context.Context {
 	return context.WithValue(ctx, shardingKeyCtxKey{}, key)
 }
 
-// ShardingKeyFromCtx extracts the ShardingKey from the context.
-func ShardingKeyFromCtx(ctx context.Context) (*ShardingKey, bool) {
+// ShardingKeyFromContext extracts the ShardingKey from the context.
+func ShardingKeyFromContext(ctx context.Context) (*ShardingKey, bool) {
 	key, ok := ctx.Value(shardingKeyCtxKey{}).(*ShardingKey)
 	return key, ok && key != nil
 }
