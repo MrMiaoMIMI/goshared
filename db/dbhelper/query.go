@@ -31,7 +31,7 @@ func Not(condition dbspi.Condition) dbspi.Query {
 }
 
 // Select creates a query that only returns specific columns.
-func Select(columns []dbspi.Column, conditions ...dbspi.Condition) dbspi.SelectQuery {
+func Select(columns []dbspi.Column, conditions ...dbspi.Condition) dbspi.Query {
 	return dbsp.Select(columns, conditions...)
 }
 
@@ -43,11 +43,6 @@ func NewUpdater() dbspi.Updater {
 // NewPagination creates a pagination config.
 func NewPagination() dbspi.Pagination {
 	return dbsp.NewPagination()
-}
-
-// OrderBy creates an order config.
-func OrderBy(column dbspi.Column, desc bool) dbspi.Order {
-	return dbsp.OrderBy(column, desc)
 }
 
 // Asc creates an ascending order config.

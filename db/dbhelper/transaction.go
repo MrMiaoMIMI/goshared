@@ -15,7 +15,7 @@ import (
 type Tx struct {
 	manager          *dbsp.Manager
 	databaseGroupKey string
-	commonFields     dbspi.CommonFieldAutoFillOptions
+	commonFields     dbsp.CommonFieldAutoFillOptions
 }
 
 // Transaction runs fn in a single physical database transaction.

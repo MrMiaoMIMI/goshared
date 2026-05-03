@@ -47,12 +47,6 @@ type Query interface {
 	Condition
 }
 
-// SelectQuery wraps a Query with specific column selection.
-type SelectQuery interface {
-	Query
-	Columns() []Column
-}
-
 // Updater is used to update the entity
 type Updater interface {
 	Set(column Column, value any) Updater

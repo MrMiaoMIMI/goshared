@@ -8,7 +8,7 @@ import (
 // NewManager creates a new Manager from the given configuration.
 func NewManager(cfg dbspi.DatabaseConfig, opts ...ManagerOption) dbspi.Manager {
 	options := resolveManagerOptions(opts)
-	commonFields := options.commonFields.apply(dbspi.DefaultCommonFieldAutoFillOptions())
+	commonFields := options.commonFields.apply(dbsp.DefaultCommonFieldAutoFillOptions())
 	return dbsp.NewManager(cfg, commonFields)
 }
 

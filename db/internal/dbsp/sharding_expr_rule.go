@@ -10,8 +10,8 @@ import (
 // ================== Expression DB Rule ==================
 
 var (
-	_ dbspi.DatabaseShardingRule       = (*exprDbRule)(nil)
-	_ dbspi.ShardingKeyColumnsProvider = (*exprDbRule)(nil)
+	_ DatabaseShardingRule       = (*exprDbRule)(nil)
+	_ ShardingKeyColumnsProvider = (*exprDbRule)(nil)
 )
 
 type exprDbRule struct {
@@ -125,10 +125,10 @@ func copyContextVars(src, dst *expr.EvalContext) {
 // ================== Expression Table Rule ==================
 
 var (
-	_ dbspi.TableShardingRule          = (*exprTableRule)(nil)
-	_ dbspi.TableShardCounter          = (*exprTableRule)(nil)
-	_ dbspi.TableShardEnumerator       = (*exprTableRule)(nil)
-	_ dbspi.ShardingKeyColumnsProvider = (*exprTableRule)(nil)
+	_ TableShardingRule          = (*exprTableRule)(nil)
+	_ TableShardCounter          = (*exprTableRule)(nil)
+	_ TableShardEnumerator       = (*exprTableRule)(nil)
+	_ ShardingKeyColumnsProvider = (*exprTableRule)(nil)
 )
 
 type exprTableRule struct {

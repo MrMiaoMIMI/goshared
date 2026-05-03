@@ -17,21 +17,23 @@ type commonFieldTimeOnlyTestEntity struct {
 	Name string `gorm:"column:name"`
 }
 
+type commonFieldTimeContextKey struct{}
+
 func (*commonFieldTestEntity) TableName() string {
 	return "common_field_test_tab"
 }
 
-func testCommonFieldAutoFillOptions() dbspi.CommonFieldAutoFillOptions {
-	return dbspi.CommonFieldAutoFillOptions{
+func testCommonFieldAutoFillOptions() CommonFieldAutoFillOptions {
+	return CommonFieldAutoFillOptions{
 		AutoFillEnabled:  true,
-		TimeProvider:     func() uint64 { return 12345 },
+		TimeProvider:     func(context.Context) uint64 { return 12345 },
 		OperatorProvider: dbspi.OperatorFromContext,
 	}
 }
 
 func TestDefaultCommonFieldAutoFillOptionsEnableAutofill(t *testing.T) {
-	opts := dbspi.DefaultCommonFieldAutoFillOptions()
-	opts.TimeProvider = func() uint64 { return 12345 }
+	opts := DefaultCommonFieldAutoFillOptions()
+	opts.TimeProvider = func(context.Context) uint64 { return 12345 }
 	entity := &commonFieldTimeOnlyTestEntity{}
 
 	applyCreateCommonFields(context.Background(), opts, entity)
@@ -44,10 +46,28 @@ func TestDefaultCommonFieldAutoFillOptionsEnableAutofill(t *testing.T) {
 func TestDisabledCommonFieldAutoFillOptionsSkipAutofill(t *testing.T) {
 	entity := &commonFieldTimeOnlyTestEntity{}
 
-	applyCreateCommonFields(context.Background(), dbspi.DisabledCommonFieldAutoFillOptions(), entity)
+	applyCreateCommonFields(context.Background(), DisabledCommonFieldAutoFillOptions(), entity)
 
 	if entity.Ctime != 0 || entity.Mtime != 0 {
 		t.Fatalf("disabled common field options should skip autofill: %+v", entity.TimeFields)
+	}
+}
+
+func TestTimeProviderReceivesOperationContext(t *testing.T) {
+	ctx := context.WithValue(context.Background(), commonFieldTimeContextKey{}, uint64(67890))
+	opts := testCommonFieldAutoFillOptions()
+	opts.TimeProvider = func(ctx context.Context) uint64 {
+		if v, ok := ctx.Value(commonFieldTimeContextKey{}).(uint64); ok {
+			return v
+		}
+		return 0
+	}
+	entity := &commonFieldTimeOnlyTestEntity{}
+
+	applyCreateCommonFields(ctx, opts, entity)
+
+	if entity.Ctime != 67890 || entity.Mtime != 67890 {
+		t.Fatalf("time provider should receive operation context: %+v", entity.TimeFields)
 	}
 }
 

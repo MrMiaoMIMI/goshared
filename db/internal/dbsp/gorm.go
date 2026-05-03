@@ -343,7 +343,12 @@ func NewQuery(conditions ...dbspi.Condition) dbspi.Query {
 	return newQuery(keywordAnd, conditions...)
 }
 
-// GormSelectQuery implements dbspi.SelectQuery
+type selectQuery interface {
+	dbspi.Query
+	Columns() []dbspi.Column
+}
+
+// GormSelectQuery implements selectQuery.
 type GormSelectQuery struct {
 	*GormQuery
 	columns []dbspi.Column
@@ -354,7 +359,7 @@ func (q *GormSelectQuery) Columns() []dbspi.Column {
 }
 
 // Select wraps a query with specific column selection.
-func Select(columns []dbspi.Column, conditions ...dbspi.Condition) dbspi.SelectQuery {
+func Select(columns []dbspi.Column, conditions ...dbspi.Condition) dbspi.Query {
 	return &GormSelectQuery{
 		GormQuery: &GormQuery{keyword: keywordAnd, conditions: conditions},
 		columns:   columns,
@@ -544,7 +549,7 @@ func (u *GormUpdater) Values() map[string]any {
 type GormExecutor[T dbspi.Entity] struct {
 	db                  dbSession
 	emptyEntityInstance T
-	commonFields        dbspi.CommonFieldAutoFillOptions
+	commonFields        CommonFieldAutoFillOptions
 }
 
 // NewExecutor creates a new GormExecutor with the given entity instance
@@ -554,7 +559,7 @@ func NewExecutor[T dbspi.Entity](db dbSession, entityInstance T) *GormExecutor[T
 	return NewExecutorWithTableName(db, entityInstance, entityInstance.TableName())
 }
 
-func NewExecutorWithCommonFieldAutoFill[T dbspi.Entity](db dbSession, entityInstance T, commonFields dbspi.CommonFieldAutoFillOptions) *GormExecutor[T] {
+func NewExecutorWithCommonFieldAutoFill[T dbspi.Entity](db dbSession, entityInstance T, commonFields CommonFieldAutoFillOptions) *GormExecutor[T] {
 	return newExecutorWithTableName(db, entityInstance, entityInstance.TableName(), commonFields)
 }
 
@@ -577,14 +582,14 @@ func (e *GormExecutor[T]) CountAll(ctx context.Context, query dbspi.Query) (uint
 // Example:
 // NewExecutorWithTableName(db, &User{}, "user_tab_00000001")
 func NewExecutorWithTableName[T dbspi.Entity](db dbSession, entityInstance T, tableName string) *GormExecutor[T] {
-	return newExecutorWithTableName(db, entityInstance, tableName, dbspi.DisabledCommonFieldAutoFillOptions())
+	return newExecutorWithTableName(db, entityInstance, tableName, DisabledCommonFieldAutoFillOptions())
 }
 
-func NewExecutorWithTableNameAndCommonFields[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields dbspi.CommonFieldAutoFillOptions) *GormExecutor[T] {
+func NewExecutorWithTableNameAndCommonFields[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields CommonFieldAutoFillOptions) *GormExecutor[T] {
 	return newExecutorWithTableName(db, entityInstance, tableName, commonFields)
 }
 
-func newExecutorWithTableName[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields dbspi.CommonFieldAutoFillOptions) *GormExecutor[T] {
+func newExecutorWithTableName[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields CommonFieldAutoFillOptions) *GormExecutor[T] {
 	if any(entityInstance) == nil {
 		panic("entityInstance is nil")
 	}
@@ -827,7 +832,7 @@ func (d *GormDb) Find(ctx context.Context, dest any, query dbspi.Query, paginati
 		}
 	}
 
-	if sq, ok := query.(dbspi.SelectQuery); ok && len(sq.Columns()) > 0 {
+	if sq, ok := query.(selectQuery); ok && len(sq.Columns()) > 0 {
 		colNames := make([]string, len(sq.Columns()))
 		for i, c := range sq.Columns() {
 			colNames[i] = c.Name()

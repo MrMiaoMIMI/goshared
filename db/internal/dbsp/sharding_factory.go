@@ -15,10 +15,10 @@ type ShardOption func(*shardConfig)
 
 type shardConfig struct {
 	dbs            []DatabaseTarget
-	dbRule         dbspi.DatabaseShardingRule
-	tableRule      dbspi.TableShardingRule
+	dbRule         DatabaseShardingRule
+	tableRule      TableShardingRule
 	maxConcurrency int
-	commonFields   dbspi.CommonFieldAutoFillOptions
+	commonFields   CommonFieldAutoFillOptions
 }
 
 // NewShardedExecutorWithOptions creates a sharded executor with the given entity and options.
@@ -44,14 +44,14 @@ func WithDbs(dbs []DatabaseTarget) ShardOption {
 }
 
 // WithDbRule sets the database sharding rule.
-func WithDbRule(rule dbspi.DatabaseShardingRule) ShardOption {
+func WithDbRule(rule DatabaseShardingRule) ShardOption {
 	return func(c *shardConfig) {
 		c.dbRule = rule
 	}
 }
 
 // WithTableRule sets the table sharding rule.
-func WithTableRule(rule dbspi.TableShardingRule) ShardOption {
+func WithTableRule(rule TableShardingRule) ShardOption {
 	return func(c *shardConfig) {
 		c.tableRule = rule
 	}
@@ -64,7 +64,7 @@ func WithMaxConcurrency(n int) ShardOption {
 	}
 }
 
-func WithCommonFieldAutoFill(commonFields dbspi.CommonFieldAutoFillOptions) ShardOption {
+func WithCommonFieldAutoFill(commonFields CommonFieldAutoFillOptions) ShardOption {
 	return func(c *shardConfig) {
 		c.commonFields = commonFields
 	}
@@ -72,7 +72,7 @@ func WithCommonFieldAutoFill(commonFields dbspi.CommonFieldAutoFillOptions) Shar
 
 // BuildExprDbRule creates an expression-based DB sharding rule from a name template
 // and expand expressions.
-func BuildExprDbRule(nameExpr string, expandExprs []string) (dbspi.DatabaseShardingRule, error) {
+func BuildExprDbRule(nameExpr string, expandExprs []string) (DatabaseShardingRule, error) {
 	tmpl, err := expr.ParseTemplate(nameExpr)
 	if err != nil {
 		return nil, fmt.Errorf("parse db name_expr %q: %w", nameExpr, err)
@@ -87,7 +87,7 @@ func BuildExprDbRule(nameExpr string, expandExprs []string) (dbspi.DatabaseShard
 
 // BuildExprTableRule creates an expression-based table sharding rule from a name template
 // and expand expressions.
-func BuildExprTableRule(nameExpr string, expandExprs []string) (dbspi.TableShardingRule, error) {
+func BuildExprTableRule(nameExpr string, expandExprs []string) (TableShardingRule, error) {
 	tmpl, err := expr.ParseTemplate(nameExpr)
 	if err != nil {
 		return nil, fmt.Errorf("parse table name_expr %q: %w", nameExpr, err)
@@ -100,7 +100,7 @@ func BuildExprTableRule(nameExpr string, expandExprs []string) (dbspi.TableShard
 }
 
 // MustBuildExprDbRule is the panic-on-error variant of BuildExprDbRule.
-func MustBuildExprDbRule(nameExpr string, expandExprs ...string) dbspi.DatabaseShardingRule {
+func MustBuildExprDbRule(nameExpr string, expandExprs ...string) DatabaseShardingRule {
 	rule, err := BuildExprDbRule(nameExpr, expandExprs)
 	if err != nil {
 		panic(fmt.Sprintf("NewExprDbRule: %v", err))
@@ -109,7 +109,7 @@ func MustBuildExprDbRule(nameExpr string, expandExprs ...string) dbspi.DatabaseS
 }
 
 // MustBuildExprTableRule is the panic-on-error variant of BuildExprTableRule.
-func MustBuildExprTableRule(nameExpr string, expandExprs ...string) dbspi.TableShardingRule {
+func MustBuildExprTableRule(nameExpr string, expandExprs ...string) TableShardingRule {
 	rule, err := BuildExprTableRule(nameExpr, expandExprs)
 	if err != nil {
 		panic(fmt.Sprintf("NewExprTableRule: %v", err))
@@ -290,14 +290,14 @@ func buildDatabaseTargets(cfg ShardingConfig) ([]DatabaseTarget, error) {
 	return SingleDb(newDbFromServer(*cfg.Server, cfg.Server.DatabaseName)), nil
 }
 
-func buildDbRule(cfg *dbspi.DatabaseShardingConfig) (dbspi.DatabaseShardingRule, error) {
+func buildDbRule(cfg *dbspi.DatabaseShardingConfig) (DatabaseShardingRule, error) {
 	if cfg == nil || cfg.NameExpr == "" {
 		return nil, nil
 	}
 	return BuildExprDbRule(cfg.NameExpr, cfg.ExpandExprs)
 }
 
-func buildTableRule(cfg *dbspi.TableShardingConfig) (dbspi.TableShardingRule, error) {
+func buildTableRule(cfg *dbspi.TableShardingConfig) (TableShardingRule, error) {
 	if cfg == nil || cfg.NameExpr == "" {
 		return nil, nil
 	}
@@ -340,20 +340,20 @@ type resolvedDbEntry struct {
 	db  dbSession
 	dbs []DatabaseTarget
 
-	dbRule           dbspi.DatabaseShardingRule
-	defaultTableRule dbspi.TableShardingRule
+	dbRule           DatabaseShardingRule
+	defaultTableRule TableShardingRule
 	maxConcurrency   int
 
 	entityOverrides map[string]*entityOverride
 }
 
 type entityOverride struct {
-	tableRule      dbspi.TableShardingRule
+	tableRule      TableShardingRule
 	maxConcurrency *int
 }
 
 type txBoundDbRule struct {
-	rule      dbspi.DatabaseShardingRule
+	rule      DatabaseShardingRule
 	targetKey string
 }
 
@@ -370,7 +370,7 @@ func (r txBoundDbRule) ResolveDatabaseTargetKey(key *dbspi.ShardingKey) (string,
 
 type txBoundDbRuleWithColumns struct {
 	txBoundDbRule
-	provider dbspi.ShardingKeyColumnsProvider
+	provider ShardingKeyColumnsProvider
 }
 
 func (r txBoundDbRuleWithColumns) RequiredColumns() []string {
@@ -381,15 +381,15 @@ func (r txBoundDbRuleWithColumns) RequiredColumns() []string {
 type Manager struct {
 	mu           sync.RWMutex
 	entries      map[string]*resolvedDbEntry
-	commonFields dbspi.CommonFieldAutoFillOptions
+	commonFields CommonFieldAutoFillOptions
 }
 
 func (*Manager) ManagerHandle() {}
 
 // CommonFieldAutoFillOptions returns the manager-level common-field configuration.
-func (m *Manager) CommonFieldAutoFillOptions() dbspi.CommonFieldAutoFillOptions {
+func (m *Manager) CommonFieldAutoFillOptions() CommonFieldAutoFillOptions {
 	if m == nil {
-		return dbspi.DefaultCommonFieldAutoFillOptions()
+		return DefaultCommonFieldAutoFillOptions()
 	}
 	return m.commonFields
 }
@@ -397,7 +397,7 @@ func (m *Manager) CommonFieldAutoFillOptions() dbspi.CommonFieldAutoFillOptions 
 // Transaction starts a transaction for one database group and passes a
 // transaction-scoped manager to fn. The scoped manager preserves the selected
 // group's table rules but routes all database access through the transaction Db.
-func (m *Manager) Transaction(ctx context.Context, dbKey string, shardingKey *dbspi.ShardingKey, commonFields dbspi.CommonFieldAutoFillOptions, fn func(txMgr *Manager) error) error {
+func (m *Manager) Transaction(ctx context.Context, dbKey string, shardingKey *dbspi.ShardingKey, commonFields CommonFieldAutoFillOptions, fn func(txMgr *Manager) error) error {
 	if m == nil {
 		m = DefaultManager()
 	}
@@ -469,7 +469,7 @@ func cloneEntryForTransaction(entry *resolvedDbEntry, txDb dbSession, targetKey 
 	txEntry.dbs = []DatabaseTarget{{Key: targetKey, Db: txDb}}
 	if entry.dbRule != nil {
 		boundRule := txBoundDbRule{rule: entry.dbRule, targetKey: targetKey}
-		if provider, ok := entry.dbRule.(dbspi.ShardingKeyColumnsProvider); ok {
+		if provider, ok := entry.dbRule.(ShardingKeyColumnsProvider); ok {
 			txEntry.dbRule = txBoundDbRuleWithColumns{txBoundDbRule: boundRule, provider: provider}
 		} else {
 			txEntry.dbRule = boundRule
@@ -484,7 +484,7 @@ var (
 )
 
 // NewManager creates a new Manager from the given configuration.
-func NewManager(cfg dbspi.DatabaseConfig, commonFields dbspi.CommonFieldAutoFillOptions) *Manager {
+func NewManager(cfg dbspi.DatabaseConfig, commonFields CommonFieldAutoFillOptions) *Manager {
 	mgr := &Manager{
 		entries:      make(map[string]*resolvedDbEntry, len(cfg.DatabaseGroups)),
 		commonFields: commonFields.Normalize(),
@@ -523,7 +523,7 @@ func For[T dbspi.Entity](entity T, managers ...*Manager) dbspi.Executor[T] {
 	return ForWithCommonFieldAutoFill(entity, mgr, mgr.commonFields)
 }
 
-func ForWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields dbspi.CommonFieldAutoFillOptions) dbspi.Executor[T] {
+func ForWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields CommonFieldAutoFillOptions) dbspi.Executor[T] {
 	if mgr == nil {
 		mgr = DefaultManager()
 	}
@@ -594,7 +594,7 @@ func ForEnhance[T dbspi.Entity](entity T, managers ...*Manager) dbspi.EnhancedEx
 	return enhanced
 }
 
-func ForEnhanceWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields dbspi.CommonFieldAutoFillOptions) dbspi.EnhancedExecutor[T] {
+func ForEnhanceWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields CommonFieldAutoFillOptions) dbspi.EnhancedExecutor[T] {
 	exec := ForWithCommonFieldAutoFill(entity, mgr, commonFields)
 	enhanced, ok := exec.(dbspi.EnhancedExecutor[T])
 	if !ok {

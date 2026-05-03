@@ -43,43 +43,13 @@ func (sk *ShardingKey) Get(name string) (any, error) {
 	return v, nil
 }
 
-// Fields returns the underlying map (read-only usage intended).
+// Fields returns a copy of the sharding key values.
 func (sk *ShardingKey) Fields() map[string]any {
-	return sk.fields
-}
-
-// ================== Sharding Rule Interfaces ==================
-
-// DatabaseShardingRule resolves a ShardingKey to a target key string.
-// The returned string is matched against the configured database target key.
-type DatabaseShardingRule interface {
-	ResolveDatabaseTargetKey(key *ShardingKey) (targetKey string, err error)
-}
-
-// TableShardingRule resolves the physical table name from the logical
-// table name and a ShardingKey.
-type TableShardingRule interface {
-	ResolveTable(logicalTable string, key *ShardingKey) (string, error)
-}
-
-// TableShardCounter is an optional interface that table sharding rules can
-// implement to declare the total number of shards. Used by FindAll /
-// CountAll to enumerate all physical tables.
-type TableShardCounter interface {
-	ShardCount() int
-}
-
-// TableShardEnumerator generates the physical table name for a given shard index.
-// Used by scatter-gather (FindAll/CountAll) to enumerate all physical tables.
-type TableShardEnumerator interface {
-	ShardName(logicalTable string, index int) (string, error)
-}
-
-// ShardingKeyColumnsProvider is an optional interface that sharding rules
-// can implement to declare which @{column} names they require.
-// Used by sharded executors to auto-extract sharding keys from CRUD parameters.
-type ShardingKeyColumnsProvider interface {
-	RequiredColumns() []string
+	fields := make(map[string]any, len(sk.fields))
+	for k, v := range sk.fields {
+		fields[k] = v
+	}
+	return fields
 }
 
 // ================== Context helpers ==================

@@ -14,10 +14,10 @@ import (
 // ShardedExecutorConfig is the internal config for creating a sharded executor.
 type ShardedExecutorConfig struct {
 	Dbs               []DatabaseTarget
-	DbRule            dbspi.DatabaseShardingRule
-	TableShardingRule dbspi.TableShardingRule
+	DbRule            DatabaseShardingRule
+	TableShardingRule TableShardingRule
 	MaxConcurrency    int
-	CommonFields      dbspi.CommonFieldAutoFillOptions
+	CommonFields      CommonFieldAutoFillOptions
 }
 
 // shardingKeyResolver auto-extracts sharding key column values from CRUD parameters.
@@ -30,12 +30,12 @@ type shardingKeyResolver struct {
 
 // buildShardingKeyResolver creates a resolver from the sharding rules and entity type.
 // Returns nil if any rule doesn't implement ShardingKeyColumnsProvider.
-func buildShardingKeyResolver(entityType reflect.Type, idColumnName string, dbRule dbspi.DatabaseShardingRule, tableRule dbspi.TableShardingRule) *shardingKeyResolver {
+func buildShardingKeyResolver(entityType reflect.Type, idColumnName string, dbRule DatabaseShardingRule, tableRule TableShardingRule) *shardingKeyResolver {
 	seen := make(map[string]bool)
 	var requiredCols []string
 
 	if dbRule != nil {
-		provider, ok := dbRule.(dbspi.ShardingKeyColumnsProvider)
+		provider, ok := dbRule.(ShardingKeyColumnsProvider)
 		if !ok {
 			return nil
 		}
@@ -47,7 +47,7 @@ func buildShardingKeyResolver(entityType reflect.Type, idColumnName string, dbRu
 		}
 	}
 	if tableRule != nil {
-		provider, ok := tableRule.(dbspi.ShardingKeyColumnsProvider)
+		provider, ok := tableRule.(ShardingKeyColumnsProvider)
 		if !ok {
 			return nil
 		}
@@ -313,11 +313,11 @@ func (e *shardedExecutor[T]) isRequiredColumn(col string) bool {
 type shardedExecutor[T dbspi.Entity] struct {
 	entity         T
 	dbs            []DatabaseTarget
-	dbRule         dbspi.DatabaseShardingRule
-	tableRule      dbspi.TableShardingRule
+	dbRule         DatabaseShardingRule
+	tableRule      TableShardingRule
 	maxConcurrency int
 	keyResolver    *shardingKeyResolver
-	commonFields   dbspi.CommonFieldAutoFillOptions
+	commonFields   CommonFieldAutoFillOptions
 }
 
 func NewShardedExecutor[T dbspi.Entity](entity T, cfg ShardedExecutorConfig) *shardedExecutor[T] {
@@ -806,14 +806,14 @@ func (e *shardedExecutor[T]) allShardTargets() ([]shardTarget, error) {
 
 	tableCount := 0
 	if e.tableRule != nil {
-		if counter, ok := e.tableRule.(dbspi.TableShardCounter); ok {
+		if counter, ok := e.tableRule.(TableShardCounter); ok {
 			tableCount = counter.ShardCount()
 		}
 	}
 
 	for _, dt := range e.dbs {
 		if tableCount > 0 {
-			enumerator, ok := e.tableRule.(dbspi.TableShardEnumerator)
+			enumerator, ok := e.tableRule.(TableShardEnumerator)
 			if !ok {
 				return nil, fmt.Errorf("table rule implements TableShardCounter but not TableShardEnumerator")
 			}

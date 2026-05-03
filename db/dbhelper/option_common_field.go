@@ -1,6 +1,9 @@
 package dbhelper
 
-import "github.com/MrMiaoMIMI/goshared/db/dbspi"
+import (
+	"github.com/MrMiaoMIMI/goshared/db/dbspi"
+	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp"
+)
 
 // WithCommonFieldAutoFill enables or disables common-field autofill.
 func WithCommonFieldAutoFill(enabled bool) CommonFieldAutoFillOption {
@@ -23,6 +26,7 @@ func WithCommonFieldOverwriteExplicitValues(overwrite bool) CommonFieldAutoFillO
 }
 
 // WithCommonFieldTimeProvider sets the timestamp provider for ctime/mtime.
+// The provider receives the context passed to the current database operation.
 // The default provider returns Unix milliseconds.
 func WithCommonFieldTimeProvider(provider dbspi.TimeProvider) CommonFieldAutoFillOption {
 	return commonFieldOptionFunc(func(p *commonFieldPatch) {
@@ -60,7 +64,7 @@ type commonFieldPatch struct {
 	operatorProvider           dbspi.OperatorProvider
 }
 
-func (p commonFieldPatch) apply(base dbspi.CommonFieldAutoFillOptions) dbspi.CommonFieldAutoFillOptions {
+func (p commonFieldPatch) apply(base dbsp.CommonFieldAutoFillOptions) dbsp.CommonFieldAutoFillOptions {
 	if p.setEnabled {
 		base.AutoFillEnabled = p.enabled
 	}

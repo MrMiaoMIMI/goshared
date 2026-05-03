@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MrMiaoMIMI/goshared/db/dbspi"
+	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp"
 )
 
 type customManager struct{}
@@ -22,30 +22,30 @@ func TestCommonFieldAutoFillOptionsCanConfigureManagerAndExecutor(t *testing.T) 
 	managerOptions := resolveManagerOptions([]ManagerOption{opt})
 	executorOptions := resolveExecutorOptions([]ExecutorOption{opt})
 
-	if managerOptions.commonFields.apply(dbspi.DefaultCommonFieldAutoFillOptions()).AutoFillEnabled {
+	if managerOptions.commonFields.apply(dbsp.DefaultCommonFieldAutoFillOptions()).AutoFillEnabled {
 		t.Fatal("manager common fields should be disabled")
 	}
-	if executorOptions.commonFields.apply(dbspi.DefaultCommonFieldAutoFillOptions()).AutoFillEnabled {
+	if executorOptions.commonFields.apply(dbsp.DefaultCommonFieldAutoFillOptions()).AutoFillEnabled {
 		t.Fatal("executor common fields should be disabled")
 	}
 }
 
 func TestExecutorCommonFieldAutoFillOptionsOverlayManagerDefaults(t *testing.T) {
-	managerCommonFields := dbspi.DefaultCommonFieldAutoFillOptions()
-	managerCommonFields.TimeProvider = func() uint64 { return 1 }
+	managerCommonFields := dbsp.DefaultCommonFieldAutoFillOptions()
+	managerCommonFields.TimeProvider = func(context.Context) uint64 { return 1 }
 	managerCommonFields.OperatorProvider = func(context.Context) (string, bool) {
 		return "manager", true
 	}
 
 	executorOptions := resolveExecutorOptions([]ExecutorOption{
-		WithCommonFieldTimeProvider(func() uint64 { return 2 }),
+		WithCommonFieldTimeProvider(func(context.Context) uint64 { return 2 }),
 		WithCommonFieldOperatorProvider(func(context.Context) (string, bool) {
 			return "executor", true
 		}),
 	})
 	commonFields := executorOptions.commonFields.apply(managerCommonFields)
 
-	if got := commonFields.TimeProvider(); got != 2 {
+	if got := commonFields.TimeProvider(context.Background()); got != 2 {
 		t.Fatalf("time provider = %d, want 2", got)
 	}
 	if got, ok := commonFields.OperatorProvider(context.Background()); !ok || got != "executor" {
@@ -54,7 +54,7 @@ func TestExecutorCommonFieldAutoFillOptionsOverlayManagerDefaults(t *testing.T) 
 }
 
 func TestCommonFieldOverwriteExplicitValuesOptionCanSetFalse(t *testing.T) {
-	managerCommonFields := dbspi.DefaultCommonFieldAutoFillOptions()
+	managerCommonFields := dbsp.DefaultCommonFieldAutoFillOptions()
 	managerCommonFields.OverwriteExplicitValues = true
 
 	executorOptions := resolveExecutorOptions([]ExecutorOption{
