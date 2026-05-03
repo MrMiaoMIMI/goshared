@@ -54,10 +54,10 @@ func Transaction(ctx context.Context, fn func(tx *Tx) error, opts ...Transaction
 
 func newTxExecutor[T dbspi.Entity](entity T, tx *Tx, commonFields commonFieldPatch) dbspi.Executor[T] {
 	if tx == nil || tx.manager == nil {
-		return errorExecutor[T]{err: fmt.Errorf("dbhelper: transaction is nil")}
+		return dbsp.NewErrorExecutor[T](fmt.Errorf("dbhelper: transaction is nil"))
 	}
 	if err := validateTxEntityDatabaseGroupKey(tx, entity); err != nil {
-		return errorExecutor[T]{err: err}
+		return dbsp.NewErrorExecutor[T](err)
 	}
 	resolvedCommonFields := commonFields.apply(tx.commonFields)
 	return dbsp.ForWithCommonFieldAutoFill(entity, tx.manager, resolvedCommonFields)
@@ -65,10 +65,10 @@ func newTxExecutor[T dbspi.Entity](entity T, tx *Tx, commonFields commonFieldPat
 
 func newTxEnhancedExecutor[T dbspi.Entity](entity T, tx *Tx, commonFields commonFieldPatch) dbspi.EnhancedExecutor[T] {
 	if tx == nil || tx.manager == nil {
-		return errorEnhancedExecutor[T]{errorExecutor: errorExecutor[T]{err: fmt.Errorf("dbhelper: transaction is nil")}}
+		return dbsp.NewErrorEnhancedExecutor[T](fmt.Errorf("dbhelper: transaction is nil"))
 	}
 	if err := validateTxEntityDatabaseGroupKey(tx, entity); err != nil {
-		return errorEnhancedExecutor[T]{errorExecutor: errorExecutor[T]{err: err}}
+		return dbsp.NewErrorEnhancedExecutor[T](err)
 	}
 
 	resolvedCommonFields := commonFields.apply(tx.commonFields)

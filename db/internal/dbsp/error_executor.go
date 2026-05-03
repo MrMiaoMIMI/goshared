@@ -1,4 +1,4 @@
-package dbhelper
+package dbsp
 
 import (
 	"context"
@@ -8,6 +8,10 @@ import (
 
 type errorExecutor[T dbspi.Entity] struct {
 	err error
+}
+
+func NewErrorExecutor[T dbspi.Entity](err error) dbspi.Executor[T] {
+	return errorExecutor[T]{err: err}
 }
 
 func (e errorExecutor[T]) Shard(*dbspi.ShardingKey) (dbspi.Executor[T], error) {
@@ -100,6 +104,10 @@ func (e errorExecutor[T]) CountAll(context.Context, dbspi.Query) (uint64, error)
 
 type errorEnhancedExecutor[T dbspi.Entity] struct {
 	errorExecutor[T]
+}
+
+func NewErrorEnhancedExecutor[T dbspi.Entity](err error) dbspi.EnhancedExecutor[T] {
+	return errorEnhancedExecutor[T]{errorExecutor: errorExecutor[T]{err: err}}
 }
 
 func (e errorEnhancedExecutor[T]) SoftDeleteById(context.Context, any) error {

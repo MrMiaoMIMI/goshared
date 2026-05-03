@@ -5,24 +5,11 @@ import (
 	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp"
 )
 
-type managerHandle struct {
-	manager *dbsp.Manager
-}
-
-func (*managerHandle) ManagerHandle() {}
-
-func (m *managerHandle) internalManager() *dbsp.Manager {
-	if m == nil {
-		return nil
-	}
-	return m.manager
-}
-
 // NewManager creates a new Manager from the given configuration.
 func NewManager(cfg dbspi.DatabaseConfig, opts ...ManagerOption) dbspi.Manager {
 	options := resolveManagerOptions(opts)
 	commonFields := options.commonFields.apply(dbspi.DefaultCommonFieldAutoFillOptions())
-	return &managerHandle{manager: dbsp.NewManager(cfg, commonFields)}
+	return dbsp.NewManager(cfg, commonFields)
 }
 
 // SetDefaultManager sets the global default Manager.
@@ -32,7 +19,7 @@ func SetDefaultManager(mgr dbspi.Manager) {
 
 // DefaultManager returns the global default Manager.
 func DefaultManager() dbspi.Manager {
-	return &managerHandle{manager: dbsp.DefaultManager()}
+	return dbsp.DefaultManager()
 }
 
 // NewExecutor creates an Executor for the given entity using the Manager.
@@ -85,18 +72,13 @@ func resolveExecutorOptions(opts []ExecutorOption) executorOptions {
 	return options
 }
 
-type managerUnwrapper interface {
-	dbspi.Manager
-	internalManager() *dbsp.Manager
-}
-
 func asInternalManager(mgr dbspi.Manager) *dbsp.Manager {
 	if mgr == nil {
 		return nil
 	}
-	internal, ok := mgr.(managerUnwrapper)
+	internal, ok := mgr.(*dbsp.Manager)
 	if !ok {
 		panic("dbhelper: unsupported dbspi.Manager implementation; use dbhelper.NewManager")
 	}
-	return internal.internalManager()
+	return internal
 }

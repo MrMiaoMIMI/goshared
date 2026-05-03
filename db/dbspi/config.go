@@ -96,25 +96,3 @@ type TableShardingConfig struct {
 	// ExpandExprs are variable declarations and computations.
 	ExpandExprs []string `yaml:"expand_exprs" json:"expand_exprs"`
 }
-
-// Manager is an opaque database manager handle returned by dbhelper.NewManager.
-//
-// Do not implement this interface directly. dbhelper only supports Manager
-// values returned by dbhelper.NewManager or dbhelper.DefaultManager.
-type Manager interface {
-	ManagerHandle()
-}
-
-type Pagination interface {
-	WithLimit(limit *int) Pagination
-	WithOffset(offset *int) Pagination
-	AppendOrder(order Order) Pagination
-	Limit() *int
-	Offset() *int
-	Orders() []Order
-}
-
-type Order interface {
-	Column() Column
-	Desc() bool
-}

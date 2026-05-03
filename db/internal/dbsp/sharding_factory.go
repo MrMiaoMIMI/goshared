@@ -384,6 +384,8 @@ type Manager struct {
 	commonFields dbspi.CommonFieldAutoFillOptions
 }
 
+func (*Manager) ManagerHandle() {}
+
 // CommonFieldAutoFillOptions returns the manager-level common-field configuration.
 func (m *Manager) CommonFieldAutoFillOptions() dbspi.CommonFieldAutoFillOptions {
 	if m == nil {
