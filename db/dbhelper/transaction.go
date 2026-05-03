@@ -10,7 +10,7 @@ import (
 
 // Tx is a transaction-scoped database manager.
 //
-// Use NewExecutor or NewEnhancedExecutor with WithTx to create table executors
+// Use NewTableStore or NewSoftDeleteTableStore with WithTx to create table stores
 // that run on the same underlying database transaction.
 type Tx struct {
 	manager          *dbsp.Manager
@@ -24,8 +24,8 @@ type Tx struct {
 // Use WithTransactionDatabaseGroupKey to select the database group. For db-sharded groups,
 // WithTransactionShardingKey is required to select one physical database shard. Local
 // transactions do not span multiple database groups or database shards.
-// Inside fn, create one or more table executors with NewExecutor or
-// NewEnhancedExecutor plus WithTx(tx).
+// Inside fn, create one or more table stores with NewTableStore or
+// NewSoftDeleteTableStore plus WithTx(tx).
 func Transaction(ctx context.Context, fn func(tx *Tx) error, opts ...TransactionOption) error {
 	if fn == nil {
 		return fmt.Errorf("dbhelper: transaction function is nil")
@@ -52,27 +52,27 @@ func Transaction(ctx context.Context, fn func(tx *Tx) error, opts ...Transaction
 	})
 }
 
-func newTxExecutor[T dbspi.Entity](entity T, tx *Tx, commonFields commonFieldPatch) dbspi.Executor[T] {
+func newTxTableStore[T dbspi.Entity](entity T, tx *Tx, commonFields commonFieldPatch) dbspi.TableStore[T] {
 	if tx == nil || tx.manager == nil {
-		return dbsp.NewErrorExecutor[T](fmt.Errorf("dbhelper: transaction is nil"))
+		return dbsp.NewErrorTableStore[T](fmt.Errorf("dbhelper: transaction is nil"))
 	}
 	if err := validateTxEntityDatabaseGroupKey(tx, entity); err != nil {
-		return dbsp.NewErrorExecutor[T](err)
+		return dbsp.NewErrorTableStore[T](err)
 	}
 	resolvedCommonFields := commonFields.apply(tx.commonFields)
 	return dbsp.ForWithCommonFieldAutoFill(entity, tx.manager, resolvedCommonFields)
 }
 
-func newTxEnhancedExecutor[T dbspi.Entity](entity T, tx *Tx, commonFields commonFieldPatch) dbspi.EnhancedExecutor[T] {
+func newTxSoftDeleteTableStore[T dbspi.Entity](entity T, tx *Tx, commonFields commonFieldPatch) dbspi.SoftDeleteTableStore[T] {
 	if tx == nil || tx.manager == nil {
-		return dbsp.NewErrorEnhancedExecutor[T](fmt.Errorf("dbhelper: transaction is nil"))
+		return dbsp.NewErrorSoftDeleteTableStore[T](fmt.Errorf("dbhelper: transaction is nil"))
 	}
 	if err := validateTxEntityDatabaseGroupKey(tx, entity); err != nil {
-		return dbsp.NewErrorEnhancedExecutor[T](err)
+		return dbsp.NewErrorSoftDeleteTableStore[T](err)
 	}
 
 	resolvedCommonFields := commonFields.apply(tx.commonFields)
-	return dbsp.ForEnhanceWithCommonFieldAutoFill(entity, tx.manager, resolvedCommonFields)
+	return dbsp.ForSoftDeleteWithCommonFieldAutoFill(entity, tx.manager, resolvedCommonFields)
 }
 
 func resolveTransactionOptions(opts []TransactionOption) transactionOptions {

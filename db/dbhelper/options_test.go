@@ -16,40 +16,40 @@ type optionEntity struct{}
 
 func (*optionEntity) TableName() string { return "option_tab" }
 
-func TestCommonFieldAutoFillOptionsCanConfigureManagerAndExecutor(t *testing.T) {
+func TestCommonFieldAutoFillOptionsCanConfigureManagerAndTableStore(t *testing.T) {
 	opt := WithCommonFieldAutoFill(false)
 
 	managerOptions := resolveManagerOptions([]ManagerOption{opt})
-	executorOptions := resolveExecutorOptions([]ExecutorOption{opt})
+	tableStoreOptions := resolveTableStoreOptions([]TableStoreOption{opt})
 
 	if managerOptions.commonFields.apply(dbsp.DefaultCommonFieldAutoFillOptions()).AutoFillEnabled {
 		t.Fatal("manager common fields should be disabled")
 	}
-	if executorOptions.commonFields.apply(dbsp.DefaultCommonFieldAutoFillOptions()).AutoFillEnabled {
-		t.Fatal("executor common fields should be disabled")
+	if tableStoreOptions.commonFields.apply(dbsp.DefaultCommonFieldAutoFillOptions()).AutoFillEnabled {
+		t.Fatal("table store common fields should be disabled")
 	}
 }
 
-func TestExecutorCommonFieldAutoFillOptionsOverlayManagerDefaults(t *testing.T) {
+func TestTableStoreCommonFieldAutoFillOptionsOverlayManagerDefaults(t *testing.T) {
 	managerCommonFields := dbsp.DefaultCommonFieldAutoFillOptions()
 	managerCommonFields.TimeProvider = func(context.Context) uint64 { return 1 }
 	managerCommonFields.OperatorProvider = func(context.Context) (string, bool) {
 		return "manager", true
 	}
 
-	executorOptions := resolveExecutorOptions([]ExecutorOption{
+	tableStoreOptions := resolveTableStoreOptions([]TableStoreOption{
 		WithCommonFieldTimeProvider(func(context.Context) uint64 { return 2 }),
 		WithCommonFieldOperatorProvider(func(context.Context) (string, bool) {
-			return "executor", true
+			return "table_store", true
 		}),
 	})
-	commonFields := executorOptions.commonFields.apply(managerCommonFields)
+	commonFields := tableStoreOptions.commonFields.apply(managerCommonFields)
 
 	if got := commonFields.TimeProvider(context.Background()); got != 2 {
 		t.Fatalf("time provider = %d, want 2", got)
 	}
-	if got, ok := commonFields.OperatorProvider(context.Background()); !ok || got != "executor" {
-		t.Fatalf("operator provider = %q, %v; want executor, true", got, ok)
+	if got, ok := commonFields.OperatorProvider(context.Background()); !ok || got != "table_store" {
+		t.Fatalf("operator provider = %q, %v; want table_store, true", got, ok)
 	}
 }
 
@@ -57,13 +57,13 @@ func TestCommonFieldOverwriteExplicitValuesOptionCanSetFalse(t *testing.T) {
 	managerCommonFields := dbsp.DefaultCommonFieldAutoFillOptions()
 	managerCommonFields.OverwriteExplicitValues = true
 
-	executorOptions := resolveExecutorOptions([]ExecutorOption{
+	tableStoreOptions := resolveTableStoreOptions([]TableStoreOption{
 		WithCommonFieldOverwriteExplicitValues(false),
 	})
-	commonFields := executorOptions.commonFields.apply(managerCommonFields)
+	commonFields := tableStoreOptions.commonFields.apply(managerCommonFields)
 
 	if commonFields.OverwriteExplicitValues {
-		t.Fatal("overwrite explicit values should be disabled by NewExecutor option")
+		t.Fatal("overwrite explicit values should be disabled by NewTableStore option")
 	}
 }
 
@@ -82,18 +82,18 @@ func TestUnsupportedManagerImplementationPanics(t *testing.T) {
 }
 
 func TestWithTxOptionTakesPrecedenceOverManager(t *testing.T) {
-	exec := NewExecutor(&optionEntity{}, WithManager(customManager{}), WithTx(nil))
+	store := NewTableStore(&optionEntity{}, WithManager(customManager{}), WithTx(nil))
 
-	err := exec.Create(context.Background(), &optionEntity{})
+	err := store.Create(context.Background(), &optionEntity{})
 	if err == nil || !strings.Contains(err.Error(), "transaction is nil") {
 		t.Fatalf("Create error = %v, want transaction nil error", err)
 	}
 }
 
-func TestNewEnhancedExecutorWithNilTxReturnsMethodError(t *testing.T) {
-	exec := NewEnhancedExecutor(&optionEntity{}, WithTx(nil))
+func TestNewSoftDeleteTableStoreWithNilTxReturnsMethodError(t *testing.T) {
+	store := NewSoftDeleteTableStore(&optionEntity{}, WithTx(nil))
 
-	_, err := exec.CountNotDeleted(context.Background(), nil)
+	_, err := store.CountNotDeleted(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "transaction is nil") {
 		t.Fatalf("CountNotDeleted error = %v, want transaction nil error", err)
 	}

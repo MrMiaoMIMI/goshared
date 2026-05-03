@@ -46,7 +46,7 @@ func (*SoftDeleteField) SoftDeleteFieldName() string {
 
 // CreateTimeField provides the standard create timestamp field.
 //
-// By default, dbhelper-managed executors fill this field with Unix
+// By default, dbhelper-managed table stores fill this field with Unix
 // milliseconds. Use dbhelper.WithCommonFieldTimeProvider to customize the unit.
 type CreateTimeField struct {
 	Ctime uint64 `gorm:"column:ctime;not null;default:0" json:"ctime"`
@@ -71,7 +71,7 @@ func (*CreateTimeField) CtimeFieldName() string {
 
 // UpdateTimeField provides the standard update timestamp field.
 //
-// By default, dbhelper-managed executors fill this field with Unix
+// By default, dbhelper-managed table stores fill this field with Unix
 // milliseconds. Use dbhelper.WithCommonFieldTimeProvider to customize the unit.
 type UpdateTimeField struct {
 	Mtime uint64 `gorm:"column:mtime;not null;default:0" json:"mtime"`

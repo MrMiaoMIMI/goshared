@@ -11,7 +11,7 @@ import (
 // ================================================================
 // Manager Example: Top-down configuration-driven database management
 //
-// One config → one Manager → all executors.
+// One config → one Manager → all table stores.
 // Entity declares its database group via DatabaseGroupKey().
 // No need to manually create database sessions or sharding rules.
 // ================================================================
@@ -57,17 +57,17 @@ func Test_Manager_Simple(t *testing.T) {
 		},
 	})
 
-	userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
+	userStore := dbhelper.NewTableStore(&User{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
-	users, err := userExec.Find(ctx, nil, nil)
+	users, err := userStore.Find(ctx, nil, nil)
 	requireNoError(t, err)
 	if len(users) == 0 {
 		t.Fatal("expected users from default database")
 	}
 }
 
-func Test_Manager_NewEnhancedExecutor_Simple(t *testing.T) {
+func Test_Manager_NewSoftDeleteTableStore_Simple(t *testing.T) {
 	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
@@ -77,10 +77,10 @@ func Test_Manager_NewEnhancedExecutor_Simple(t *testing.T) {
 		},
 	})
 
-	userExec := dbhelper.NewEnhancedExecutor(&User{}, dbhelper.WithManager(mgr))
+	userStore := dbhelper.NewSoftDeleteTableStore(&User{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
-	count, err := userExec.CountNotDeleted(ctx, nil)
+	count, err := userStore.CountNotDeleted(ctx, nil)
 	requireNoError(t, err)
 	if count == 0 {
 		t.Fatal("expected non-deleted user count")
@@ -99,10 +99,10 @@ func Test_Manager_DSN(t *testing.T) {
 		},
 	})
 
-	userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
+	userStore := dbhelper.NewTableStore(&User{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
-	users, err := userExec.Find(ctx, nil, nil)
+	users, err := userStore.Find(ctx, nil, nil)
 	requireNoError(t, err)
 	if len(users) == 0 {
 		t.Fatal("expected users from DSN database")
@@ -142,20 +142,20 @@ func Test_Manager_ShardedWithReuse(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
-	itemExec := dbhelper.NewExecutor(&OrderItem{}, dbhelper.WithManager(mgr))
-	detailExec := dbhelper.NewExecutor(&OrderDetail{}, dbhelper.WithManager(mgr))
+	orderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithManager(mgr))
+	itemStore := dbhelper.NewTableStore(&OrderItem{}, dbhelper.WithManager(mgr))
+	detailStore := dbhelper.NewTableStore(&OrderDetail{}, dbhelper.WithManager(mgr))
 
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
-	_, err := orderExec.Find(ctx, nil, nil)
+	_, err := orderStore.Find(ctx, nil, nil)
 	requireNoError(t, err)
 
-	_, err = itemExec.Find(ctx, nil, nil)
+	_, err = itemStore.Find(ctx, nil, nil)
 	requireNoError(t, err)
 
-	_, err = detailExec.Find(ctx, nil, nil)
+	_, err = detailStore.Find(ctx, nil, nil)
 	requireNoError(t, err)
 }
 
@@ -182,13 +182,13 @@ func Test_Manager_NamedDatabaseSharding(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
+	orderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithManager(mgr))
 
 	sk := dbspi.NewShardingKey().
 		Set(OrderFields.Region, "SG").
 		Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
-	_, err := orderExec.Find(ctx, nil, nil)
+	_, err := orderStore.Find(ctx, nil, nil)
 	requireNoError(t, err)
 }
 
@@ -217,11 +217,11 @@ func Test_Manager_GlobalDefault(t *testing.T) {
 
 	dbhelper.SetDefaultManager(mgr)
 
-	userExec := dbhelper.NewExecutor(&User{})
-	orderExec := dbhelper.NewExecutor(&Order{})
+	userStore := dbhelper.NewTableStore(&User{})
+	orderStore := dbhelper.NewTableStore(&Order{})
 
 	ctx := context.Background()
-	users, err := userExec.Find(ctx, nil, nil)
+	users, err := userStore.Find(ctx, nil, nil)
 	requireNoError(t, err)
 	if len(users) == 0 {
 		t.Fatal("expected users from global default manager")
@@ -229,6 +229,6 @@ func Test_Manager_GlobalDefault(t *testing.T) {
 
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx = dbspi.WithShardingKey(ctx, sk)
-	_, err = orderExec.Find(ctx, nil, nil)
+	_, err = orderStore.Find(ctx, nil, nil)
 	requireNoError(t, err)
 }

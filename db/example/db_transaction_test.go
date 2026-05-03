@@ -33,34 +33,34 @@ func Test_Transaction_MultiTable_Commit(t *testing.T) {
 	mgr := testManager(testDatabaseName)
 	ensureShopTable(t, ctx, mgr)
 
-	userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
-	shopExec := dbhelper.NewExecutor(&Shop{}, dbhelper.WithManager(mgr))
+	userStore := dbhelper.NewTableStore(&User{}, dbhelper.WithManager(mgr))
+	shopStore := dbhelper.NewTableStore(&Shop{}, dbhelper.WithManager(mgr))
 
 	suffix := time.Now().UnixNano()
 	email := fmt.Sprintf("tx_commit_%d@example.com", suffix)
 	shopName := fmt.Sprintf("tx_commit_shop_%d", suffix)
-	cleanupTransactionRows(t, ctx, userExec, shopExec, email, shopName)
+	cleanupTransactionRows(t, ctx, userStore, shopStore, email, shopName)
 	t.Cleanup(func() {
-		cleanupTransactionRows(t, ctx, userExec, shopExec, email, shopName)
+		cleanupTransactionRows(t, ctx, userStore, shopStore, email, shopName)
 	})
 
 	err := dbhelper.Transaction(ctx, func(tx *dbhelper.Tx) error {
-		txUserExec := dbhelper.NewExecutor(&User{}, dbhelper.WithTx(tx))
-		txShopExec := dbhelper.NewExecutor(&Shop{}, dbhelper.WithTx(tx))
+		txUserStore := dbhelper.NewTableStore(&User{}, dbhelper.WithTx(tx))
+		txShopStore := dbhelper.NewTableStore(&Shop{}, dbhelper.WithTx(tx))
 
-		if err := txUserExec.Create(ctx, &User{Name: "Tx Commit User", Email: email, Age: 20, Status: "active"}); err != nil {
+		if err := txUserStore.Create(ctx, &User{Name: "Tx Commit User", Email: email, Age: 20, Status: "active"}); err != nil {
 			return err
 		}
-		return txShopExec.Create(ctx, &Shop{Name: shopName, OwnerEmail: email})
+		return txShopStore.Create(ctx, &Shop{Name: shopName, OwnerEmail: email})
 	}, dbhelper.WithManager(mgr))
 	requireNoError(t, err)
 
-	userExists, _, err := userExec.Exists(ctx, dbhelper.Q(NewUserFieldManager().Email.Eq(&email)))
+	userExists, _, err := userStore.Exists(ctx, dbhelper.Q(NewUserFieldManager().Email.Eq(&email)))
 	requireNoError(t, err)
 	if !userExists {
 		t.Fatal("expected committed user row")
 	}
-	shopExists, _, err := shopExec.Exists(ctx, dbhelper.Q(ShopFields.Name.Eq(&shopName)))
+	shopExists, _, err := shopStore.Exists(ctx, dbhelper.Q(ShopFields.Name.Eq(&shopName)))
 	requireNoError(t, err)
 	if !shopExists {
 		t.Fatal("expected committed shop row")
@@ -72,23 +72,23 @@ func Test_Transaction_MultiTable_Rollback(t *testing.T) {
 	mgr := testManager(testDatabaseName)
 	ensureShopTable(t, ctx, mgr)
 
-	userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
-	shopExec := dbhelper.NewExecutor(&Shop{}, dbhelper.WithManager(mgr))
+	userStore := dbhelper.NewTableStore(&User{}, dbhelper.WithManager(mgr))
+	shopStore := dbhelper.NewTableStore(&Shop{}, dbhelper.WithManager(mgr))
 
 	suffix := time.Now().UnixNano()
 	email := fmt.Sprintf("tx_rollback_%d@example.com", suffix)
 	shopName := fmt.Sprintf("tx_rollback_shop_%d", suffix)
-	cleanupTransactionRows(t, ctx, userExec, shopExec, email, shopName)
+	cleanupTransactionRows(t, ctx, userStore, shopStore, email, shopName)
 
 	rollbackErr := errors.New("rollback transaction")
 	err := dbhelper.Transaction(ctx, func(tx *dbhelper.Tx) error {
-		txUserExec := dbhelper.NewExecutor(&User{}, dbhelper.WithTx(tx))
-		txShopExec := dbhelper.NewExecutor(&Shop{}, dbhelper.WithTx(tx))
+		txUserStore := dbhelper.NewTableStore(&User{}, dbhelper.WithTx(tx))
+		txShopStore := dbhelper.NewTableStore(&Shop{}, dbhelper.WithTx(tx))
 
-		if err := txUserExec.Create(ctx, &User{Name: "Tx Rollback User", Email: email, Age: 20, Status: "active"}); err != nil {
+		if err := txUserStore.Create(ctx, &User{Name: "Tx Rollback User", Email: email, Age: 20, Status: "active"}); err != nil {
 			return err
 		}
-		if err := txShopExec.Create(ctx, &Shop{Name: shopName, OwnerEmail: email}); err != nil {
+		if err := txShopStore.Create(ctx, &Shop{Name: shopName, OwnerEmail: email}); err != nil {
 			return err
 		}
 		return rollbackErr
@@ -97,12 +97,12 @@ func Test_Transaction_MultiTable_Rollback(t *testing.T) {
 		t.Fatalf("transaction error = %v, want rollbackErr", err)
 	}
 
-	userExists, _, err := userExec.Exists(ctx, dbhelper.Q(NewUserFieldManager().Email.Eq(&email)))
+	userExists, _, err := userStore.Exists(ctx, dbhelper.Q(NewUserFieldManager().Email.Eq(&email)))
 	requireNoError(t, err)
 	if userExists {
 		t.Fatal("rollback should remove user row")
 	}
-	shopExists, _, err := shopExec.Exists(ctx, dbhelper.Q(ShopFields.Name.Eq(&shopName)))
+	shopExists, _, err := shopStore.Exists(ctx, dbhelper.Q(ShopFields.Name.Eq(&shopName)))
 	requireNoError(t, err)
 	if shopExists {
 		t.Fatal("rollback should remove shop row")
@@ -117,29 +117,29 @@ func Test_Transaction_ShardedSameDb(t *testing.T) {
 			"order_dbs":                   orderShopTableEntry(10),
 		},
 	})
-	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
+	orderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithManager(mgr))
 
 	amount := time.Now().UnixNano()
 	shopID1 := int64(12345)
 	shopID2 := int64(12346)
-	cleanupOrderRows(t, ctx, orderExec, shopID1, amount)
-	cleanupOrderRows(t, ctx, orderExec, shopID2, amount)
+	cleanupOrderRows(t, ctx, orderStore, shopID1, amount)
+	cleanupOrderRows(t, ctx, orderStore, shopID2, amount)
 	t.Cleanup(func() {
-		cleanupOrderRows(t, ctx, orderExec, shopID1, amount)
-		cleanupOrderRows(t, ctx, orderExec, shopID2, amount)
+		cleanupOrderRows(t, ctx, orderStore, shopID1, amount)
+		cleanupOrderRows(t, ctx, orderStore, shopID2, amount)
 	})
 
 	err := dbhelper.Transaction(ctx, func(tx *dbhelper.Tx) error {
-		txOrderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithTx(tx))
-		if err := txOrderExec.Create(ctx, &Order{ShopID: shopID1, Amount: amount}); err != nil {
+		txOrderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithTx(tx))
+		if err := txOrderStore.Create(ctx, &Order{ShopID: shopID1, Amount: amount}); err != nil {
 			return err
 		}
-		return txOrderExec.Create(ctx, &Order{ShopID: shopID2, Amount: amount})
+		return txOrderStore.Create(ctx, &Order{ShopID: shopID2, Amount: amount})
 	}, dbhelper.WithManager(mgr), dbhelper.WithTransactionDatabaseGroupKey("order_dbs"))
 	requireNoError(t, err)
 
-	assertOrderExists(t, ctx, orderExec, shopID1, amount)
-	assertOrderExists(t, ctx, orderExec, shopID2, amount)
+	assertOrderExists(t, ctx, orderStore, shopID1, amount)
+	assertOrderExists(t, ctx, orderStore, shopID2, amount)
 }
 
 func Test_Transaction_DbShardCrossShardRejected(t *testing.T) {
@@ -163,16 +163,20 @@ func Test_Transaction_DbShardCrossShardRejected(t *testing.T) {
 
 	txKey := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	err := dbhelper.Transaction(ctx, func(tx *dbhelper.Tx) error {
-		txOrderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithTx(tx))
-		return txOrderExec.Create(ctx, &Order{ShopID: 12344, Amount: time.Now().UnixNano()})
+		txOrderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithTx(tx))
+		return txOrderStore.Create(ctx, &Order{ShopID: 12344, Amount: time.Now().UnixNano()})
 	}, dbhelper.WithManager(mgr), dbhelper.WithTransactionDatabaseGroupKey("order_dbs"), dbhelper.WithTransactionShardingKey(txKey))
 	requireErrorContains(t, err, "cross-shard")
 }
 
 func ensureShopTable(t *testing.T, ctx context.Context, mgr dbspi.Manager) {
 	t.Helper()
-	exec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
-	requireNoError(t, exec.Exec(ctx, `
+	store := dbhelper.NewTableStore(&User{}, dbhelper.WithManager(mgr))
+	sqlStore, ok := dbhelper.AsSQLTableStore(store)
+	if !ok {
+		t.Fatal("expected SQLTableStore support")
+	}
+	requireNoError(t, sqlStore.Exec(ctx, `
 CREATE TABLE IF NOT EXISTS shop_tab (
 	id BIGINT NOT NULL AUTO_INCREMENT,
 	name VARCHAR(255) NOT NULL DEFAULT '',
@@ -181,23 +185,23 @@ CREATE TABLE IF NOT EXISTS shop_tab (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`))
 }
 
-func cleanupTransactionRows(t *testing.T, ctx context.Context, userExec dbspi.Executor[*User], shopExec dbspi.Executor[*Shop], email string, shopName string) {
+func cleanupTransactionRows(t *testing.T, ctx context.Context, userStore dbspi.TableStore[*User], shopStore dbspi.TableStore[*Shop], email string, shopName string) {
 	t.Helper()
-	requireNoError(t, userExec.DeleteByQuery(ctx, dbhelper.Q(NewUserFieldManager().Email.Eq(&email))))
-	requireNoError(t, shopExec.DeleteByQuery(ctx, dbhelper.Q(ShopFields.Name.Eq(&shopName))))
+	requireNoError(t, userStore.DeleteByQuery(ctx, dbhelper.Q(NewUserFieldManager().Email.Eq(&email))))
+	requireNoError(t, shopStore.DeleteByQuery(ctx, dbhelper.Q(ShopFields.Name.Eq(&shopName))))
 }
 
-func cleanupOrderRows(t *testing.T, ctx context.Context, orderExec dbspi.Executor[*Order], shopID int64, amount int64) {
+func cleanupOrderRows(t *testing.T, ctx context.Context, orderStore dbspi.TableStore[*Order], shopID int64, amount int64) {
 	t.Helper()
-	requireNoError(t, orderExec.DeleteByQuery(ctx, dbhelper.Q(
+	requireNoError(t, orderStore.DeleteByQuery(ctx, dbhelper.Q(
 		OrderFields.ShopID.Eq(&shopID),
 		dbhelper.NewField[int64]("amount").Eq(&amount),
 	)))
 }
 
-func assertOrderExists(t *testing.T, ctx context.Context, orderExec dbspi.Executor[*Order], shopID int64, amount int64) {
+func assertOrderExists(t *testing.T, ctx context.Context, orderStore dbspi.TableStore[*Order], shopID int64, amount int64) {
 	t.Helper()
-	exists, _, err := orderExec.Exists(ctx, dbhelper.Q(
+	exists, _, err := orderStore.Exists(ctx, dbhelper.Q(
 		OrderFields.ShopID.Eq(&shopID),
 		dbhelper.NewField[int64]("amount").Eq(&amount),
 	))

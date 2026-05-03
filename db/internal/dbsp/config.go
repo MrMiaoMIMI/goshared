@@ -49,7 +49,7 @@ type Order struct {
 	desc   bool
 }
 
-func OrderBy(column dbspi.Column, desc bool) dbspi.Order {
+func newOrder(column dbspi.Column, desc bool) dbspi.Order {
 	return &Order{
 		column: column,
 		desc:   desc,
@@ -57,11 +57,11 @@ func OrderBy(column dbspi.Column, desc bool) dbspi.Order {
 }
 
 func Asc(column dbspi.Column) dbspi.Order {
-	return OrderBy(column, false)
+	return newOrder(column, false)
 }
 
 func Desc(column dbspi.Column) dbspi.Order {
-	return OrderBy(column, true)
+	return newOrder(column, true)
 }
 
 func (c *Order) Column() dbspi.Column {

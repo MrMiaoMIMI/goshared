@@ -8,12 +8,12 @@ type ManagerOption interface {
 	applyManagerOption(*managerOptions)
 }
 
-// ExecutorOption configures an Executor created by NewExecutor or NewEnhancedExecutor.
+// TableStoreOption configures a TableStore created by NewTableStore or NewSoftDeleteTableStore.
 //
-// ExecutorOption is sealed to this package. Use the WithXxx helpers in dbhelper
+// TableStoreOption is sealed to this package. Use the WithXxx helpers in dbhelper
 // instead of implementing this interface directly.
-type ExecutorOption interface {
-	applyExecutorOption(*executorOptions)
+type TableStoreOption interface {
+	applyTableStoreOption(*tableStoreOptions)
 }
 
 // TransactionOption configures a transaction created by Transaction.
@@ -25,16 +25,16 @@ type TransactionOption interface {
 }
 
 // CommonFieldAutoFillOption can be used both as a Manager global option and as a
-// per-table NewExecutor/NewEnhancedExecutor override.
+// per-table NewTableStore/NewSoftDeleteTableStore override.
 type CommonFieldAutoFillOption interface {
 	ManagerOption
-	ExecutorOption
+	TableStoreOption
 	TransactionOption
 }
 
-// ManagerSelectionOption selects the Manager used by NewExecutor, NewEnhancedExecutor,
+// ManagerSelectionOption selects the Manager used by NewTableStore, NewSoftDeleteTableStore,
 // or Transaction.
 type ManagerSelectionOption interface {
-	ExecutorOption
+	TableStoreOption
 	TransactionOption
 }

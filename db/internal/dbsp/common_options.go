@@ -4,7 +4,7 @@ import "github.com/MrMiaoMIMI/goshared/db/dbspi"
 
 // CommonFieldAutoFillOptions configures automatic maintenance for common fields.
 type CommonFieldAutoFillOptions struct {
-	// AutoFillEnabled controls whether executors apply common-field automation at all.
+	// AutoFillEnabled controls whether table stores apply common-field automation at all.
 	AutoFillEnabled bool
 
 	// OverwriteExplicitValues controls whether generated common-field values may

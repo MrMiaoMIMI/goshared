@@ -315,7 +315,7 @@ func TestApplyCommonFieldsSupportsTimeFieldsOnly(t *testing.T) {
 
 	updater := NewUpdater().Set(NewField[string]("name"), "new name")
 	applyUpdateCommonFieldsToUpdater(ctx, testCommonFieldAutoFillOptions(), entity, updater)
-	params := updater.Values()
+	params, _ := readUpdaterValues(updater)
 	if params[dbspi.DefaultMtimeFieldName] != uint64(12345) {
 		t.Fatalf("mtime = %v, want 12345", params[dbspi.DefaultMtimeFieldName])
 	}
@@ -333,7 +333,7 @@ func TestApplyUpdateCommonFieldsToUpdaterKeepsExplicitValues(t *testing.T) {
 
 	applyUpdateCommonFieldsToUpdater(ctx, testCommonFieldAutoFillOptions(), model, updater)
 
-	params := updater.Values()
+	params, _ := readUpdaterValues(updater)
 	if params[dbspi.DefaultMtimeFieldName] != uint64(9) {
 		t.Fatalf("mtime = %v, want explicit 9", params[dbspi.DefaultMtimeFieldName])
 	}
@@ -349,7 +349,7 @@ func TestApplyUpdateCommonFieldsToUpdaterAddsMissingValues(t *testing.T) {
 
 	applyUpdateCommonFieldsToUpdater(ctx, testCommonFieldAutoFillOptions(), model, updater)
 
-	params := updater.Values()
+	params, _ := readUpdaterValues(updater)
 	if params[dbspi.DefaultMtimeFieldName] != uint64(12345) {
 		t.Fatalf("mtime = %v, want 12345", params[dbspi.DefaultMtimeFieldName])
 	}
@@ -369,7 +369,7 @@ func TestApplyUpdateCommonFieldsToUpdaterCanOverwriteExplicitValues(t *testing.T
 
 	applyUpdateCommonFieldsToUpdater(ctx, opts, model, updater)
 
-	params := updater.Values()
+	params, _ := readUpdaterValues(updater)
 	if params[dbspi.DefaultMtimeFieldName] != uint64(12345) {
 		t.Fatalf("mtime = %v, want 12345", params[dbspi.DefaultMtimeFieldName])
 	}

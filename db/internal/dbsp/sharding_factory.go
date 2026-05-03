@@ -10,7 +10,7 @@ import (
 	"github.com/MrMiaoMIMI/goshared/db/internal/dbsp/expr"
 )
 
-// ShardOption configures a sharded executor.
+// ShardOption configures a sharded table store.
 type ShardOption func(*shardConfig)
 
 type shardConfig struct {
@@ -21,13 +21,13 @@ type shardConfig struct {
 	commonFields   CommonFieldAutoFillOptions
 }
 
-// NewShardedExecutorWithOptions creates a sharded executor with the given entity and options.
-func NewShardedExecutorWithOptions[T dbspi.Entity](entity T, opts ...ShardOption) dbspi.Executor[T] {
+// NewShardedTableStoreWithOptions creates a sharded table store with the given entity and options.
+func NewShardedTableStoreWithOptions[T dbspi.Entity](entity T, opts ...ShardOption) dbspi.TableStore[T] {
 	cfg := &shardConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	return NewShardedExecutor(entity, ShardedExecutorConfig{
+	return NewShardedTableStore(entity, ShardedTableStoreConfig{
 		Dbs:               cfg.dbs,
 		DbRule:            cfg.dbRule,
 		TableShardingRule: cfg.tableRule,
@@ -185,7 +185,7 @@ func GenDatabaseTargetsByIndex(host string, port uint, user, password string, pr
 	return GenDatabaseTargets(host, port, user, password, entries...)
 }
 
-// ShardingConfig provides a declarative configuration for sharded executors.
+// ShardingConfig provides a declarative configuration for sharded table stores.
 type ShardingConfig struct {
 	// Server configures a single database server.
 	Server *dbspi.ServerConfig `yaml:"server" json:"server"`
@@ -203,8 +203,8 @@ type ShardingConfig struct {
 	MaxConcurrency int `yaml:"max_concurrency" json:"max_concurrency"`
 }
 
-// NewShardedExecutorFromConfig creates a sharded executor from declarative configuration.
-func NewShardedExecutorFromConfig[T dbspi.Entity](entity T, cfg ShardingConfig) dbspi.Executor[T] {
+// NewShardedTableStoreFromConfig creates a sharded table store from declarative configuration.
+func NewShardedTableStoreFromConfig[T dbspi.Entity](entity T, cfg ShardingConfig) dbspi.TableStore[T] {
 	var opts []ShardOption
 
 	dbs, err := buildDatabaseTargets(cfg)
@@ -233,7 +233,7 @@ func NewShardedExecutorFromConfig[T dbspi.Entity](entity T, cfg ShardingConfig) 
 		opts = append(opts, WithMaxConcurrency(cfg.MaxConcurrency))
 	}
 
-	return NewShardedExecutorWithOptions(entity, opts...)
+	return NewShardedTableStoreWithOptions(entity, opts...)
 }
 
 func newDbFromServer(server dbspi.ServerConfig, dbName string) dbSession {
@@ -512,8 +512,8 @@ func DefaultManager() *Manager {
 	return defaultManager
 }
 
-// For creates an Executor for the given entity using the Manager.
-func For[T dbspi.Entity](entity T, managers ...*Manager) dbspi.Executor[T] {
+// For creates a TableStore for the given entity using the Manager.
+func For[T dbspi.Entity](entity T, managers ...*Manager) dbspi.TableStore[T] {
 	var mgr *Manager
 	if len(managers) > 0 && managers[0] != nil {
 		mgr = managers[0]
@@ -523,7 +523,7 @@ func For[T dbspi.Entity](entity T, managers ...*Manager) dbspi.Executor[T] {
 	return ForWithCommonFieldAutoFill(entity, mgr, mgr.commonFields)
 }
 
-func ForWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields CommonFieldAutoFillOptions) dbspi.Executor[T] {
+func ForWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields CommonFieldAutoFillOptions) dbspi.TableStore[T] {
 	if mgr == nil {
 		mgr = DefaultManager()
 	}
@@ -562,7 +562,7 @@ func ForWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFi
 		if db == nil && len(entry.dbs) > 0 {
 			db = entry.dbs[0].Db
 		}
-		return NewExecutorWithCommonFieldAutoFill(db, entity, commonFields)
+		return NewTableStoreWithCommonFieldAutoFill(db, entity, commonFields)
 	}
 
 	var opts []ShardOption
@@ -581,26 +581,26 @@ func ForWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFi
 		opts = append(opts, WithMaxConcurrency(maxConcurrency))
 	}
 	opts = append(opts, WithCommonFieldAutoFill(commonFields))
-	return NewShardedExecutorWithOptions(entity, opts...)
+	return NewShardedTableStoreWithOptions(entity, opts...)
 }
 
-// ForEnhance creates an EnhancedExecutor for the given entity using the Manager.
-func ForEnhance[T dbspi.Entity](entity T, managers ...*Manager) dbspi.EnhancedExecutor[T] {
-	exec := For(entity, managers...)
-	enhanced, ok := exec.(dbspi.EnhancedExecutor[T])
+// ForSoftDelete creates a SoftDeleteTableStore for the given entity using the Manager.
+func ForSoftDelete[T dbspi.Entity](entity T, managers ...*Manager) dbspi.SoftDeleteTableStore[T] {
+	store := For(entity, managers...)
+	softDeleteStore, ok := store.(dbspi.SoftDeleteTableStore[T])
 	if !ok {
-		panic("dbhelper: resolved executor does not implement EnhancedExecutor")
+		panic("dbhelper: resolved table store does not implement SoftDeleteTableStore")
 	}
-	return enhanced
+	return softDeleteStore
 }
 
-func ForEnhanceWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields CommonFieldAutoFillOptions) dbspi.EnhancedExecutor[T] {
-	exec := ForWithCommonFieldAutoFill(entity, mgr, commonFields)
-	enhanced, ok := exec.(dbspi.EnhancedExecutor[T])
+func ForSoftDeleteWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager, commonFields CommonFieldAutoFillOptions) dbspi.SoftDeleteTableStore[T] {
+	store := ForWithCommonFieldAutoFill(entity, mgr, commonFields)
+	softDeleteStore, ok := store.(dbspi.SoftDeleteTableStore[T])
 	if !ok {
-		panic("dbhelper: resolved executor does not implement EnhancedExecutor")
+		panic("dbhelper: resolved table store does not implement SoftDeleteTableStore")
 	}
-	return enhanced
+	return softDeleteStore
 }
 
 func resolveDbEntry(entry dbspi.DatabaseGroupConfig) *resolvedDbEntry {

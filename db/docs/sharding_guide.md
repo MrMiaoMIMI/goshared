@@ -4,7 +4,7 @@
 
 1. 编写 YAML 配置（`DatabaseConfig`）
 2. 初始化 `Manager`
-3. 通过 `NewExecutor(&Entity{})` 获取 Executor
+3. 通过 `NewTableStore(&Entity{})` 获取 TableStore
 4. CRUD 时自动/手动/混合提供 ShardingKey
 
 ---
@@ -335,16 +335,16 @@ yaml.Unmarshal(configBytes, &cfg)
 // 创建 Manager
 mgr := dbhelper.NewManager(cfg)
 
-// 获取 Executor
-userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))     // → dbspi.DefaultDatabaseGroupKey 库
-orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))   // → "order_dbs" 库组（根据 DatabaseGroupKey()）
+// 获取 TableStore
+userStore := dbhelper.NewTableStore(&User{}, dbhelper.WithManager(mgr))     // → dbspi.DefaultDatabaseGroupKey 库
+orderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithManager(mgr))   // → "order_dbs" 库组（根据 DatabaseGroupKey()）
 ```
 
 ---
 
 ## 4. ShardingKey 三种模式
 
-分片 Executor 在执行 CRUD 时，需要确定目标分片（哪个库、哪张表）。ShardingKey 的值可以来自三个来源，系统会**聚合所有来源的值**并校验它们是否指向同一个分片目标。
+分片 TableStore 在执行 CRUD 时，需要确定目标分片（哪个库、哪张表）。ShardingKey 的值可以来自三个来源，系统会**聚合所有来源的值**并校验它们是否指向同一个分片目标。
 
 ### 4.1 Auto 模式：从 CRUD 参数自动提取
 
@@ -356,7 +356,7 @@ orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))   // → 
 ctx := context.Background()
 
 // shop_id=12345 自动从 Entity struct 中读取
-err := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+err := orderStore.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 // → 路由到 order_tab_00000005（12345 % 10 = 5）
 ```
 
@@ -369,7 +369,7 @@ ctx := context.Background()
 shopId := int64(12345)
 
 // shop_id=12345 从 Eq 条件中提取
-orders, err := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+orders, err := orderStore.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 ```
 
 支持从以下条件类型中提取值：
@@ -387,7 +387,7 @@ orders, err := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 
 ```go
 // 配置：${idx} = @{id} % 10
-order, err := orderExec.GetById(ctx, int64(1001))
+order, err := orderStore.GetById(ctx, int64(1001))
 // → id=1001 自动提取，路由到对应分片
 ```
 
@@ -395,7 +395,7 @@ order, err := orderExec.GetById(ctx, int64(1001))
 
 ```go
 shopId := int64(12345)
-result, err := orderExec.FirstOrCreate(ctx,
+result, err := orderStore.FirstOrCreate(ctx,
     &Order{ShopID: 12345, Amount: 100},
     dbhelper.Q(shopIdField.Eq(&shopId)),
 )
@@ -412,7 +412,7 @@ result, err := orderExec.FirstOrCreate(ctx,
 sk := dbspi.NewShardingKey().SetValue("shop_id", int64(12345))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
-orders, err := orderExec.Find(ctx, nil, nil)
+orders, err := orderStore.Find(ctx, nil, nil)
 ```
 
 适用场景：在中间件/拦截器中统一设置，后续所有操作自动路由。
@@ -421,11 +421,11 @@ orders, err := orderExec.Find(ctx, nil, nil)
 
 ```go
 sk := dbspi.NewShardingKey().SetValue("shop_id", int64(12345))
-shardExec, err := orderExec.Shard(sk)
+shardStore, err := orderStore.Shard(sk)
 
 // 在同一分片上执行多次操作
-order, _ := shardExec.GetById(ctx, 1001)
-orders, _ := shardExec.Find(ctx, query, nil)
+order, _ := shardStore.GetById(ctx, 1001)
+orders, _ := shardStore.Find(ctx, query, nil)
 ```
 
 适用场景：同一分片上需要执行多次操作。
@@ -438,7 +438,11 @@ Raw SQL 和 Exec 无法自动提取分片键，必须手动设置：
 sk := dbspi.NewShardingKey().SetValue("shop_id", int64(12345))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
-rows, err := orderExec.Raw(ctx, "SELECT * FROM order_tab WHERE amount > ?", 100)
+sqlStore, ok := dbhelper.AsSQLTableStore(orderStore)
+if !ok {
+    return errors.New("raw SQL is not supported")
+}
+rows, err := sqlStore.Raw(ctx, "SELECT * FROM order_tab WHERE amount > ?", 100)
 ```
 
 ### 4.3 Mix 模式：自动 + 手动聚合校验
@@ -453,7 +457,7 @@ ctx := dbspi.WithShardingKey(context.Background(), sk)
 shopId := int64(12345)
 
 // Query 中也有 shop_id=12345 → 两个来源值相同 → 正常路由
-orders, err := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+orders, err := orderStore.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 // ✅ OK
 ```
 
@@ -465,7 +469,7 @@ sk := dbspi.NewShardingKey().SetValue("shop_id", int64(99999))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 // 自动：entity shop_id=12345 (12345 % 10 = 5)
-err := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+err := orderStore.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 // ❌ Error: cross-shard query not allowed: column "shop_id" values route to different targets
 ```
 
@@ -477,7 +481,7 @@ sk := dbspi.NewShardingKey().SetValue("shop_id", int64(22345))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 // 自动：entity shop_id=12345 (12345 % 10 = 5) → 同一张表
-err := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+err := orderStore.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 // ✅ OK: 两个值都路由到 order_tab_00000005
 ```
 
@@ -500,7 +504,7 @@ shopId2 := int64(21111) // 21111 % 10 = 1 → 同表
 
 // AND(shop_id=11111, shop_id=21111) → 同表 → OK
 query := dbhelper.Q(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
-orders, err := orderExec.Find(ctx, query, nil) // ✅ OK
+orders, err := orderStore.Find(ctx, query, nil) // ✅ OK
 ```
 
 ```go
@@ -509,7 +513,7 @@ shopId2 := int64(22222) // 22222 % 10 = 2 → 不同表
 
 // AND(shop_id=11111, shop_id=22222) → 跨表 → Error
 query := dbhelper.Q(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
-orders, err := orderExec.Find(ctx, query, nil) // ❌ cross-shard error
+orders, err := orderStore.Find(ctx, query, nil) // ❌ cross-shard error
 ```
 
 ### 5.2 OR 表达式
@@ -522,7 +526,7 @@ shopId2 := int64(21111) // 21111 % 10 = 1 → 同表
 
 // OR(shop_id=11111, shop_id=21111) → 同表 → OK
 orQuery := dbhelper.Or(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
-orders, err := orderExec.Find(ctx, orQuery, nil) // ✅ OK
+orders, err := orderStore.Find(ctx, orQuery, nil) // ✅ OK
 ```
 
 ```go
@@ -531,7 +535,7 @@ shopId2 := int64(22222) // 22222 % 10 = 2 → 不同表
 
 // OR(shop_id=11111, shop_id=22222) → 跨表 → Error
 orQuery := dbhelper.Or(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
-orders, err := orderExec.Find(ctx, orQuery, nil) // ❌ cross-shard error
+orders, err := orderStore.Find(ctx, orQuery, nil) // ❌ cross-shard error
 ```
 
 ### 5.3 IN 表达式
@@ -541,13 +545,13 @@ IN 的所有值都会被提取并校验：
 ```go
 // 11111 % 10 = 1, 21111 % 10 = 1, 31111 % 10 = 1 → 同表
 inQuery := dbhelper.Q(shopIdField.In([]int64{11111, 21111, 31111}))
-orders, err := orderExec.Find(ctx, inQuery, nil) // ✅ OK
+orders, err := orderStore.Find(ctx, inQuery, nil) // ✅ OK
 ```
 
 ```go
 // 11111 % 10 = 1, 22222 % 10 = 2 → 不同表
 inQuery := dbhelper.Q(shopIdField.In([]int64{11111, 22222}))
-orders, err := orderExec.Find(ctx, inQuery, nil) // ❌ cross-shard error
+orders, err := orderStore.Find(ctx, inQuery, nil) // ❌ cross-shard error
 ```
 
 ### 5.4 Entity + Query 跨源
@@ -557,7 +561,7 @@ FirstOrCreate 同时接收 Entity 和 Query，两个来源的分片值会被聚�
 ```go
 queryShopId := int64(22345) // 22345 % 10 = 5
 // Entity shop_id=12345 (% 10 = 5) + Query shop_id=22345 (% 10 = 5) → 同表
-result, err := orderExec.FirstOrCreate(ctx,
+result, err := orderStore.FirstOrCreate(ctx,
     &Order{ShopID: 12345, Amount: 100},
     dbhelper.Q(shopIdField.Eq(&queryShopId)),
 ) // ✅ OK
@@ -573,7 +577,7 @@ sk := dbspi.NewShardingKey().SetValue("shop_id", int64(22345))
 ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 shopId := int64(12345) // % 10 = 5 → 同表
-orders, err := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+orders, err := orderStore.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 // ✅ OK: 两个值都路由到 order_tab_00000005
 ```
 
@@ -592,7 +596,7 @@ query := dbhelper.Q(
     dbhelper.Or(statusField.Eq(&status1), statusField.Eq(&status2)),
     shopIdField.Eq(&shopId),
 )
-orders, err := orderExec.Find(ctx, query, nil) // ✅ OK
+orders, err := orderStore.Find(ctx, query, nil) // ✅ OK
 ```
 
 ---
@@ -605,10 +609,10 @@ orders, err := orderExec.Find(ctx, query, nil) // ✅ OK
 ctx := context.Background()
 
 // 查询所有分片，每分片批量 100 条
-allOrders, err := orderExec.FindAll(ctx, query, 100)
+allOrders, err := orderStore.FindAll(ctx, query, 100)
 
 // 统计所有分片总数
-totalCount, err := orderExec.CountAll(ctx, query)
+totalCount, err := orderStore.CountAll(ctx, query)
 ```
 
 `max_concurrency` 控制并发 goroutine 数，推荐对大分片数场景设置合理值：
@@ -763,41 +767,41 @@ func main() {
     // 2. 初始化 Manager
     mgr := dbhelper.NewManager(cfg)
 
-    // 3. 获取 Executor
-    userExec := dbhelper.NewExecutor(&User{}, dbhelper.WithManager(mgr))
-    orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
+    // 3. 获取 TableStore
+    userStore := dbhelper.NewTableStore(&User{}, dbhelper.WithManager(mgr))
+    orderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithManager(mgr))
     shopIdField := dbhelper.NewField[int64]("shop_id")
 
     ctx := context.Background()
 
     // ===== 非分片操作 =====
-    users, _ := userExec.Find(ctx, nil, nil)
+    users, _ := userStore.Find(ctx, nil, nil)
     fmt.Printf("Users: %d\n", len(users))
 
     // ===== Auto 模式：从 Entity 自动提取 =====
-    _ = orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+    _ = orderStore.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 
     // ===== Auto 模式：从 Query 自动提取 =====
     shopId := int64(12345)
-    orders, _ := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+    orders, _ := orderStore.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
     fmt.Printf("Orders: %d\n", len(orders))
 
     // ===== Manual 模式：手动设置 =====
     sk := dbspi.NewShardingKey().SetValue("shop_id", int64(12345))
     manualCtx := dbspi.WithShardingKey(ctx, sk)
-    orders, _ = orderExec.Find(manualCtx, nil, nil)
+    orders, _ = orderStore.Find(manualCtx, nil, nil)
 
     // ===== Mix 模式：手动 + 自动聚合校验 =====
     // 手动 key 和 query 都指向 shop_id % 10 = 5 → OK
     mixCtx := dbspi.WithShardingKey(ctx,
         dbspi.NewShardingKey().SetValue("shop_id", int64(22345)))
-    orders, _ = orderExec.Find(mixCtx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+    orders, _ = orderStore.Find(mixCtx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 
     // ===== Scatter-Gather =====
-    totalCount, _ := orderExec.CountAll(ctx, nil)
+    totalCount, _ := orderStore.CountAll(ctx, nil)
     fmt.Printf("Total orders: %d\n", totalCount)
 
-    allOrders, _ := orderExec.FindAll(ctx, nil, 100)
+    allOrders, _ := orderStore.FindAll(ctx, nil, 100)
     fmt.Printf("All orders: %d\n", len(allOrders))
 }
 ```
@@ -842,21 +846,22 @@ columns, set WithShardingKey(ctx, key), or use FindAll/CountAll for cross-shard 
 ```go
 shopIdField := dbhelper.NewField[int64]("shop_id")
 amountField := dbhelper.NewField[int64]("amount")
+orderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithManager(mgr))
 
 // ❌ 分片列 shop_id 只有范围条件 → 主动报错
 min := int64(10000)
-executor.Find(ctx, dbhelper.Q(shopIdField.Gt(&min)), nil)
+orderStore.Find(ctx, dbhelper.Q(shopIdField.Gt(&min)), nil)
 // → error: sharding columns [shop_id] have range conditions...
 
 // ❌ Between 同样会被检测
 min, max := int64(10000), int64(99999)
-executor.Find(ctx, dbhelper.Q(shopIdField.Between(&min, &max)), nil)
+orderStore.Find(ctx, dbhelper.Q(shopIdField.Between(&min, &max)), nil)
 // → error: sharding columns [shop_id] have range conditions...
 
 // ✅ 分片列有 Eq，非分片列的范围条件无影响
 shopId := int64(12345)
 minAmount := int64(100)
-executor.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId), amountField.Gt(&minAmount)), nil)
+orderStore.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId), amountField.Gt(&minAmount)), nil)
 // → OK: shop_id 通过 Eq 确定分片，amount 的 Gt 仅作为过滤条件
 ```
 

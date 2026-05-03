@@ -47,14 +47,17 @@ type Query interface {
 	Condition
 }
 
-// Updater is used to update the entity
+// Updater builds column updates for UpdateById and UpdateByQuery.
+//
+// Use dbhelper.NewUpdater to create values understood by the default table store
+// implementation.
 type Updater interface {
 	Set(column Column, value any) Updater
 	SetMap(columnMap map[Column]any) Updater
 	Remove(column Column) Updater
-	Values() map[string]any
 }
 
+// Entity is a database model that declares its logical table name.
 type Entity interface {
 	TableName() string
 }
@@ -67,42 +70,46 @@ type DatabaseGroupKeyProvider interface {
 	DatabaseGroupKey() string
 }
 
-type Executor[T Entity] interface {
-	// Shard routes to a specific shard by the given ShardingKey.
-	// Returns the resolved Executor bound to the target database and physical table.
-	// For non-sharded Executor, this is a no-op and returns (self, nil).
-	Shard(key *ShardingKey) (Executor[T], error)
+// TableStore provides typed CRUD and query operations for one logical table.
+type TableStore[T Entity] interface {
+	// Shard explicitly binds subsequent operations to one physical shard.
+	//
+	// Most business code should rely on auto-key routing through regular
+	// methods such as Find, Count, Create, Update, or Delete. Use Shard only
+	// when the sharding key cannot be inferred from the entity, query, or
+	// context, or for diagnostics, repair, and other advanced operations.
+	// For non-sharded TableStore, this is a no-op and returns (self, nil).
+	Shard(key *ShardingKey) (TableStore[T], error)
 
-	// Helpful Methods
-	// If T implements IdFieldNameProvider, xxById methods get id field name from IdFieldName(),
-	// otherwise use DefaultIdFieldName as the id field name
+	// ID helpers use IdFieldNameProvider when T implements it. Otherwise they
+	// use DefaultIdFieldName.
 	GetById(ctx context.Context, id any) (T, error)
 	ExistsById(ctx context.Context, id any) (bool, T, error)
 	UpdateById(ctx context.Context, id any, updater Updater) error
 	DeleteById(ctx context.Context, id any) error
 
-	// Common Methods
+	// Query methods.
 	Find(ctx context.Context, query Query, pagination Pagination) ([]T, error)
 	Exists(ctx context.Context, query Query) (bool, T, error)
 	Count(ctx context.Context, query Query) (uint64, error)
+
+	// Entity mutation methods.
 	Create(ctx context.Context, entity T) error
 	Save(ctx context.Context, entity T) error
 	Update(ctx context.Context, entity T) error
 	Delete(ctx context.Context, entity T) error
 	BatchCreate(ctx context.Context, entities []T, batchSize int) error
 	BatchSave(ctx context.Context, entities []T) error
+
+	// Query-based mutation methods.
 	UpdateByQuery(ctx context.Context, query Query, updater Updater) error
 	DeleteByQuery(ctx context.Context, query Query) error
 
 	// FirstOrCreate returns the first entity matching the query, creating it if not found.
 	FirstOrCreate(ctx context.Context, entity T, query Query) (T, error)
 
-	// Raw sql methods
-	Raw(ctx context.Context, sql string, args ...any) ([]T, error)
-	Exec(ctx context.Context, sql string, args ...any) error
-
 	// Scatter-gather methods across all shards.
-	// For non-sharded Executor, FindAll is equivalent to Find, CountAll is equivalent to Count.
+	// For non-sharded TableStore, FindAll is equivalent to Find, CountAll is equivalent to Count.
 	//
 	// FindAll returns ALL matching rows from all shards.
 	// batchSize controls the number of rows fetched per batch from each shard.
@@ -110,4 +117,17 @@ type Executor[T Entity] interface {
 	// When batchSize <= 0, each shard is queried all at once (no batching).
 	FindAll(ctx context.Context, query Query, batchSize int) ([]T, error)
 	CountAll(ctx context.Context, query Query) (uint64, error)
+}
+
+// SQLTableStore provides advanced raw SQL execution for a table store.
+//
+// Prefer TableStore methods for regular business reads and writes. For sharded
+// tables, raw SQL execution must be routed explicitly, either by calling Shard
+// first or by passing a ShardingKey in ctx.
+type SQLTableStore[T Entity] interface {
+	// Raw runs a query and scans rows into T.
+	Raw(ctx context.Context, sql string, args ...any) ([]T, error)
+
+	// Exec runs a SQL statement without returning rows.
+	Exec(ctx context.Context, sql string, args ...any) error
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 )
 
+// ErrShardingKeyRequired is returned when a sharded table operation cannot infer
+// or receive the required sharding key.
 var ErrShardingKeyRequired = errors.New("sharding key is required: " +
 	"use Shard(key) or pass via WithShardingKey(ctx, key)")
 

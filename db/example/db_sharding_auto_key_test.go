@@ -24,54 +24,54 @@ func (*RegionalOrder) IdFieldName() string      { return dbspi.DefaultIdFieldNam
 // ==================== Auto-extract from Entity ====================
 
 func Test_AutoKey_Create_FromEntity(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
-	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err := store.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 	requireNoError(t, err)
 }
 
 func Test_AutoKey_Save_FromEntity(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
-	err := executor.Save(ctx, &Order{ShopID: 12345, Amount: 200})
+	err := store.Save(ctx, &Order{ShopID: 12345, Amount: 200})
 	requireNoError(t, err)
 }
 
 func Test_AutoKey_Update_FromEntity(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
-	err := executor.Update(ctx, &Order{ID: 1, ShopID: 12345, Amount: 300})
+	err := store.Update(ctx, &Order{ID: 1, ShopID: 12345, Amount: 300})
 	requireNoError(t, err)
 }
 
 func Test_AutoKey_Delete_FromEntity(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
-	err := executor.Delete(ctx, &Order{ID: 1, ShopID: 12345})
+	err := store.Delete(ctx, &Order{ID: 1, ShopID: 12345})
 	requireNoError(t, err)
 }
 
 func Test_AutoKey_BatchCreate_FromEntity(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	entities := []*Order{
 		{ShopID: 12345, Amount: 100},
 		{ShopID: 12345, Amount: 200},
 	}
-	err := executor.BatchCreate(ctx, entities, 100)
+	err := store.BatchCreate(ctx, entities, 100)
 	requireNoError(t, err)
 }
 
 func Test_AutoKey_BatchCreate_EmptySlice(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
-	err := executor.BatchCreate(ctx, []*Order{}, 100)
+	err := store.BatchCreate(ctx, []*Order{}, 100)
 	if err != nil {
 		t.Fatalf("BatchCreate with empty slice should succeed, got: %v", err)
 	}
@@ -83,11 +83,11 @@ func Test_AutoKey_BatchCreate_EmptySlice(t *testing.T) {
 func Test_AutoKey_Find_FromQuery(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
-	orders, err := executor.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+	orders, err := store.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 	requireNoError(t, err)
 	t.Logf("Find auto-extract from query: orders=%v", orders)
 }
@@ -95,11 +95,11 @@ func Test_AutoKey_Find_FromQuery(t *testing.T) {
 func Test_AutoKey_Count_FromQuery(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
-	count, err := executor.Count(ctx, dbhelper.Q(shopIdField.Eq(&shopId)))
+	count, err := store.Count(ctx, dbhelper.Q(shopIdField.Eq(&shopId)))
 	requireNoError(t, err)
 	t.Logf("Count auto-extract from query: count=%d", count)
 }
@@ -107,11 +107,11 @@ func Test_AutoKey_Count_FromQuery(t *testing.T) {
 func Test_AutoKey_Exists_FromQuery(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
-	exists, order, err := executor.Exists(ctx, dbhelper.Q(shopIdField.Eq(&shopId)))
+	exists, order, err := store.Exists(ctx, dbhelper.Q(shopIdField.Eq(&shopId)))
 	requireNoError(t, err)
 	t.Logf("Exists auto-extract from query: exists=%v, order=%v", exists, order)
 }
@@ -119,11 +119,11 @@ func Test_AutoKey_Exists_FromQuery(t *testing.T) {
 func Test_AutoKey_DeleteByQuery_FromQuery(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
-	err := executor.DeleteByQuery(ctx, dbhelper.Q(shopIdField.Eq(&shopId)))
+	err := store.DeleteByQuery(ctx, dbhelper.Q(shopIdField.Eq(&shopId)))
 	requireNoError(t, err)
 }
 
@@ -133,7 +133,7 @@ func Test_AutoKey_Find_FromNestedQuery(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	statusField := dbhelper.NewField[int]("status")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -143,7 +143,7 @@ func Test_AutoKey_Find_FromNestedQuery(t *testing.T) {
 	nestedQuery := dbhelper.Q(
 		dbhelper.Q(shopIdField.Eq(&shopId), statusField.Eq(&status)),
 	)
-	orders, err := executor.Find(ctx, nestedQuery, nil)
+	orders, err := store.Find(ctx, nestedQuery, nil)
 	requireNoError(t, err)
 	t.Logf("Find from nested AND query: orders=%v", orders)
 }
@@ -153,7 +153,7 @@ func Test_AutoKey_Find_FromMixedQuery(t *testing.T) {
 	statusField := dbhelper.NewField[int]("status")
 	amountField := dbhelper.NewField[int64]("amount")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -168,7 +168,7 @@ func Test_AutoKey_Find_FromMixedQuery(t *testing.T) {
 		shopIdField.Eq(&shopId),
 		amountField.Gt(&amount),
 	)
-	orders, err := executor.Find(ctx, query, nil)
+	orders, err := store.Find(ctx, query, nil)
 	requireNoError(t, err)
 	t.Logf("Find from mixed query (OR + Eq + Gt): orders=%v", orders)
 }
@@ -177,32 +177,32 @@ func Test_AutoKey_Find_FromMixedQuery(t *testing.T) {
 
 func Test_AutoKey_GetById_FromId(t *testing.T) {
 	// Shard by ID column
-	executor := newOrderIDTableExecutor(10)
+	store := newOrderIDTableStore(10)
 
 	ctx := context.Background()
-	order, err := executor.GetById(ctx, int64(1001))
+	order, err := store.GetById(ctx, int64(1001))
 	requireNoError(t, err)
 	t.Logf("GetById auto-extract from id: order=%v", order)
 }
 
 func Test_AutoKey_DeleteById_FromId(t *testing.T) {
-	executor := newOrderIDTableExecutor(10)
+	store := newOrderIDTableStore(10)
 
 	ctx := context.Background()
-	err := executor.DeleteById(ctx, int64(1001))
+	err := store.DeleteById(ctx, int64(1001))
 	requireNoError(t, err)
 }
 
 // ==================== Ctx key + auto-extract aggregation ====================
 
 func Test_AutoKey_CtxAndEntity_SameTable(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	// ctx key shop_id=22345 (%10=5), entity ShopID=12345 (%10=5) → same table → OK
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(22345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
-	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err := store.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 	if err != nil {
 		t.Fatalf("Ctx and entity same table should succeed, got: %v", err)
 	}
@@ -210,13 +210,13 @@ func Test_AutoKey_CtxAndEntity_SameTable(t *testing.T) {
 }
 
 func Test_AutoKey_CtxAndEntity_CrossShard(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	// ctx key shop_id=99999 (%10=9), entity ShopID=12345 (%10=5) → different tables → error
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(99999))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
-	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err := store.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 	if err == nil {
 		t.Fatal("Expected cross-shard error when ctx key and entity differ")
 	}
@@ -229,14 +229,14 @@ func Test_AutoKey_CtxAndEntity_CrossShard(t *testing.T) {
 func Test_AutoKey_CtxAndQuery_SameTable(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	// ctx key shop_id=22345 (%10=5), query shop_id=12345 (%10=5) → same table → OK
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(22345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	shopId := int64(12345)
-	orders, err := executor.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+	orders, err := store.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 	if err != nil {
 		t.Fatalf("Ctx and query same table should succeed, got: %v", err)
 	}
@@ -246,14 +246,14 @@ func Test_AutoKey_CtxAndQuery_SameTable(t *testing.T) {
 func Test_AutoKey_CtxAndQuery_CrossShard(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	// ctx key shop_id=99999 (%10=9), query shop_id=12345 (%10=5) → different tables → error
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(99999))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	shopId := int64(12345)
-	_, err := executor.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+	_, err := store.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 	if err == nil {
 		t.Fatal("Expected cross-shard error when ctx key and query differ")
 	}
@@ -264,24 +264,28 @@ func Test_AutoKey_CtxAndQuery_CrossShard(t *testing.T) {
 }
 
 func Test_AutoKey_CtxOnly_StillWorks(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	// Only ctx key, no conflicting sources → should work as before
 	sk := dbspi.NewShardingKey().Set(OrderFields.ShopID, int64(12345))
 	ctx := dbspi.WithShardingKey(context.Background(), sk)
 
 	// Raw/Exec only uses ctx key (no auto-extraction possible)
-	err := executor.Exec(ctx, "SELECT 1")
+	sqlStore, ok := dbhelper.AsSQLTableStore(store)
+	if !ok {
+		t.Fatal("expected SQLTableStore support")
+	}
+	err := sqlStore.Exec(ctx, "SELECT 1")
 	requireNoError(t, err)
 }
 
 // ==================== Composite key: auto-extract all fields from entity ====================
 
 func Test_AutoKey_CompositeKey_FromEntity(t *testing.T) {
-	executor := newRegionalOrderCompositeExecutor()
+	store := newRegionalOrderCompositeTableStore()
 
 	ctx := context.Background()
-	err := executor.Create(ctx, &RegionalOrder{ShopID: 12345, Region: "SG", Amount: 100})
+	err := store.Create(ctx, &RegionalOrder{ShopID: 12345, Region: "SG", Amount: 100})
 	requireNoError(t, err)
 }
 
@@ -289,10 +293,10 @@ func Test_AutoKey_CompositeKey_FromEntity(t *testing.T) {
 
 func Test_AutoKey_MissingColumn_EntityLacksRegion(t *testing.T) {
 	// Order struct has no "region" field, but db rule requires @{region}
-	executor := newOrderRegionRequiredExecutor()
+	store := newOrderRegionRequiredTableStore()
 
 	ctx := context.Background()
-	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err := store.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 	if err == nil {
 		t.Fatal("Expected error for missing region column")
 	}
@@ -307,7 +311,7 @@ func Test_AutoKey_MissingColumn_EntityLacksRegion(t *testing.T) {
 func Test_AutoKey_QuerySameTable_DifferentValues(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 21111 % 10 = 1 → same table → allowed
@@ -315,7 +319,7 @@ func Test_AutoKey_QuerySameTable_DifferentValues(t *testing.T) {
 	shopId2 := int64(21111)
 
 	query := dbhelper.Q(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
-	orders, err := executor.Find(ctx, query, nil)
+	orders, err := store.Find(ctx, query, nil)
 	if err != nil {
 		t.Fatalf("Same-table values should not error, got: %v", err)
 	}
@@ -325,7 +329,7 @@ func Test_AutoKey_QuerySameTable_DifferentValues(t *testing.T) {
 func Test_AutoKey_QueryCrossShard_DifferentValues(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
@@ -333,7 +337,7 @@ func Test_AutoKey_QueryCrossShard_DifferentValues(t *testing.T) {
 	shopId2 := int64(22222)
 
 	query := dbhelper.Q(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
-	_, err := executor.Find(ctx, query, nil)
+	_, err := store.Find(ctx, query, nil)
 	if err == nil {
 		t.Fatal("Expected cross-shard error")
 	}
@@ -347,7 +351,7 @@ func Test_AutoKey_QueryCrossShard_NestedDifferentValues(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	statusField := dbhelper.NewField[int]("status")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
@@ -359,7 +363,7 @@ func Test_AutoKey_QueryCrossShard_NestedDifferentValues(t *testing.T) {
 		shopIdField.Eq(&shopId1),
 		dbhelper.Q(shopIdField.Eq(&shopId2), statusField.Eq(&status)),
 	)
-	_, err := executor.Find(ctx, conflictQuery, nil)
+	_, err := store.Find(ctx, conflictQuery, nil)
 	if err == nil {
 		t.Fatal("Expected nested cross-shard error")
 	}
@@ -372,14 +376,14 @@ func Test_AutoKey_QueryCrossShard_NestedDifferentValues(t *testing.T) {
 func Test_AutoKey_QueryNoConflict_SameValue(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
 
 	// AND(shop_id=12345, shop_id=12345) -- same value, no conflict
 	query := dbhelper.Q(shopIdField.Eq(&shopId), shopIdField.Eq(&shopId))
-	orders, err := executor.Find(ctx, query, nil)
+	orders, err := store.Find(ctx, query, nil)
 	requireNoError(t, err)
 	t.Logf("Same value no conflict: orders=%v", orders)
 }
@@ -389,13 +393,13 @@ func Test_AutoKey_QueryNoConflict_SameValue(t *testing.T) {
 func Test_AutoKey_FirstOrCreate_EntityAndQuery_NoConflict(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
 
 	// Entity and query both have shop_id=12345 -- no conflict
-	_, err := executor.FirstOrCreate(ctx,
+	_, err := store.FirstOrCreate(ctx,
 		&Order{ShopID: 12345, Amount: 100},
 		dbhelper.Q(shopIdField.Eq(&shopId)),
 	)
@@ -405,13 +409,13 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_NoConflict(t *testing.T) {
 func Test_AutoKey_FirstOrCreate_EntityAndQuery_CrossShard(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	// Entity shop_id=12345 (% 10 = 5), query shop_id=99999 (% 10 = 9) → different tables
 	queryShopId := int64(99999)
 
-	_, err := executor.FirstOrCreate(ctx,
+	_, err := store.FirstOrCreate(ctx,
 		&Order{ShopID: 12345, Amount: 100},
 		dbhelper.Q(shopIdField.Eq(&queryShopId)),
 	)
@@ -427,13 +431,13 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_CrossShard(t *testing.T) {
 func Test_AutoKey_FirstOrCreate_EntityAndQuery_SameTable(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	// Entity shop_id=12345 (% 10 = 5), query shop_id=22345 (% 10 = 5) → same table → OK
 	queryShopId := int64(22345)
 
-	_, err := executor.FirstOrCreate(ctx,
+	_, err := store.FirstOrCreate(ctx,
 		&Order{ShopID: 12345, Amount: 100},
 		dbhelper.Q(shopIdField.Eq(&queryShopId)),
 	)
@@ -445,7 +449,7 @@ func Test_AutoKey_FirstOrCreate_EntityAndQuery_SameTable(t *testing.T) {
 func Test_AutoKey_OrQuery_SameTable(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 21111 % 10 = 1 → same table → allowed
@@ -453,7 +457,7 @@ func Test_AutoKey_OrQuery_SameTable(t *testing.T) {
 	shopId2 := int64(21111)
 
 	orQuery := dbhelper.Or(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
-	orders, err := executor.Find(ctx, orQuery, nil)
+	orders, err := store.Find(ctx, orQuery, nil)
 	if err != nil {
 		t.Fatalf("OR query with same-table values should succeed, got: %v", err)
 	}
@@ -463,7 +467,7 @@ func Test_AutoKey_OrQuery_SameTable(t *testing.T) {
 func Test_AutoKey_InQuery_SameTable(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 21111 % 10 = 1 → same table → allowed
@@ -471,7 +475,7 @@ func Test_AutoKey_InQuery_SameTable(t *testing.T) {
 	shopId2 := int64(21111)
 
 	inQuery := dbhelper.Q(shopIdField.In([]int64{shopId1, shopId2}))
-	orders, err := executor.Find(ctx, inQuery, nil)
+	orders, err := store.Find(ctx, inQuery, nil)
 	if err != nil {
 		t.Fatalf("IN query with same-table values should succeed, got: %v", err)
 	}
@@ -481,7 +485,7 @@ func Test_AutoKey_InQuery_SameTable(t *testing.T) {
 func Test_AutoKey_OrQuery_CrossShard(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
@@ -489,7 +493,7 @@ func Test_AutoKey_OrQuery_CrossShard(t *testing.T) {
 	shopId2 := int64(22222)
 
 	orQuery := dbhelper.Or(shopIdField.Eq(&shopId1), shopIdField.Eq(&shopId2))
-	_, err := executor.Find(ctx, orQuery, nil)
+	_, err := store.Find(ctx, orQuery, nil)
 	if err == nil {
 		t.Fatal("Expected cross-shard error for OR query")
 	}
@@ -502,7 +506,7 @@ func Test_AutoKey_OrQuery_CrossShard(t *testing.T) {
 func Test_AutoKey_InQuery_CrossShard(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	// 11111 % 10 = 1, 22222 % 10 = 2 → different tables → error
@@ -510,7 +514,7 @@ func Test_AutoKey_InQuery_CrossShard(t *testing.T) {
 	shopId2 := int64(22222)
 
 	inQuery := dbhelper.Q(shopIdField.In([]int64{shopId1, shopId2}))
-	_, err := executor.Find(ctx, inQuery, nil)
+	_, err := store.Find(ctx, inQuery, nil)
 	if err == nil {
 		t.Fatal("Expected cross-shard error for OR query")
 	}
@@ -524,7 +528,7 @@ func Test_AutoKey_MixedQuery_OrWithAndSameTable(t *testing.T) {
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	statusField := dbhelper.NewField[int]("status")
 
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopId := int64(12345)
@@ -537,7 +541,7 @@ func Test_AutoKey_MixedQuery_OrWithAndSameTable(t *testing.T) {
 		dbhelper.Or(statusField.Eq(&status1), statusField.Eq(&status2)),
 		shopIdField.Eq(&shopId),
 	)
-	orders, err := executor.Find(ctx, query, nil)
+	orders, err := store.Find(ctx, query, nil)
 	if err != nil {
 		t.Fatalf("Mixed AND/OR with non-sharding OR column should succeed, got: %v", err)
 	}
@@ -547,10 +551,10 @@ func Test_AutoKey_MixedQuery_OrWithAndSameTable(t *testing.T) {
 // ==================== Nil query: columns not extractable ====================
 
 func Test_AutoKey_NilQuery_MissingColumn(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
-	_, err := executor.Find(ctx, nil, nil)
+	_, err := store.Find(ctx, nil, nil)
 	if err == nil {
 		t.Fatal("Expected missing column error for nil query")
 	}
@@ -583,10 +587,10 @@ func Test_AutoKey_Manager_CreateWithoutExplicitKey(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
+	orderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
-	err := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err := orderStore.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 	requireNoError(t, err)
 }
 
@@ -611,12 +615,12 @@ func Test_AutoKey_Manager_FindWithQuery(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
+	orderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
 	shopId := int64(12345)
 	shopIdField := dbhelper.NewField[int64]("shop_id")
-	orders, err := orderExec.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
+	orders, err := orderStore.Find(ctx, dbhelper.Q(shopIdField.Eq(&shopId)), nil)
 	requireNoError(t, err)
 	t.Logf("Manager Find with query auto-extract: orders=%v", orders)
 }
@@ -624,10 +628,10 @@ func Test_AutoKey_Manager_FindWithQuery(t *testing.T) {
 // ==================== ${table} Variable Tests ====================
 
 func Test_TableVar_ResolveTable(t *testing.T) {
-	executor := newTableVarExecutor(&Order{}, 10)
+	store := newTableVarTableStore(&Order{}, 10)
 
 	ctx := context.Background()
-	err := executor.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err := store.Create(ctx, &Order{ShopID: 12345, Amount: 100})
 	requireNoError(t, err)
 }
 
@@ -643,12 +647,12 @@ func (*OrderDetailTab) DatabaseGroupKey() string { return "order_dbs" }
 func (*OrderDetailTab) IdFieldName() string      { return dbspi.DefaultIdFieldName }
 
 func Test_TableVar_DifferentEntitiesSameRule(t *testing.T) {
-	orderExec := newTableVarExecutor(&Order{}, 10)
-	detailExec := newTableVarExecutor(&OrderDetailTab{}, 10)
+	orderStore := newTableVarTableStore(&Order{}, 10)
+	detailStore := newTableVarTableStore(&OrderDetailTab{}, 10)
 
 	ctx := context.Background()
-	err1 := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
-	err2 := detailExec.Create(ctx, &OrderDetailTab{ShopID: 12345, Detail: "test"})
+	err1 := orderStore.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err2 := detailStore.Create(ctx, &OrderDetailTab{ShopID: 12345, Detail: "test"})
 	requireNoError(t, err1)
 	requireNoError(t, err2)
 }
@@ -679,12 +683,12 @@ func Test_TableVar_TableRuleInheritNameExpr(t *testing.T) {
 		},
 	})
 
-	orderExec := dbhelper.NewExecutor(&Order{}, dbhelper.WithManager(mgr))
-	detailExec := dbhelper.NewExecutor(&OrderDetailTab{}, dbhelper.WithManager(mgr))
+	orderStore := dbhelper.NewTableStore(&Order{}, dbhelper.WithManager(mgr))
+	detailStore := dbhelper.NewTableStore(&OrderDetailTab{}, dbhelper.WithManager(mgr))
 
 	ctx := context.Background()
-	err1 := orderExec.Create(ctx, &Order{ShopID: 12345, Amount: 100})
-	err2 := detailExec.Create(ctx, &OrderDetailTab{ShopID: 12345, Detail: "test"})
+	err1 := orderStore.Create(ctx, &Order{ShopID: 12345, Amount: 100})
+	err2 := detailStore.Create(ctx, &OrderDetailTab{ShopID: 12345, Detail: "test"})
 	requireNoError(t, err1)
 	requireNoError(t, err2)
 }
@@ -692,12 +696,12 @@ func Test_TableVar_TableRuleInheritNameExpr(t *testing.T) {
 // ==================== Range Condition Detection Tests ====================
 
 func Test_AutoKey_RangeCondition_Detected(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	minShopId := int64(10000)
-	_, err := executor.Find(ctx, dbhelper.Q(shopIdField.Gt(&minShopId)), nil)
+	_, err := store.Find(ctx, dbhelper.Q(shopIdField.Gt(&minShopId)), nil)
 
 	if err == nil {
 		t.Fatal("expected error for range-only condition on sharding column")
@@ -709,12 +713,12 @@ func Test_AutoKey_RangeCondition_Detected(t *testing.T) {
 }
 
 func Test_AutoKey_RangeCondition_LtDetected(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	maxShopId := int64(99999)
-	_, err := executor.Find(ctx, dbhelper.Q(shopIdField.Lt(&maxShopId)), nil)
+	_, err := store.Find(ctx, dbhelper.Q(shopIdField.Lt(&maxShopId)), nil)
 
 	if err == nil {
 		t.Fatal("expected error for Lt condition on sharding column")
@@ -726,26 +730,26 @@ func Test_AutoKey_RangeCondition_LtDetected(t *testing.T) {
 }
 
 func Test_AutoKey_RangeCondition_WithEqOk(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	amountField := dbhelper.NewField[int64]("amount")
 	shopId := int64(12345)
 	minAmount := int64(100)
-	_, err := executor.Find(ctx,
+	_, err := store.Find(ctx,
 		dbhelper.Q(shopIdField.Eq(&shopId), amountField.Gt(&minAmount)), nil)
 	requireNoError(t, err)
 }
 
 func Test_AutoKey_RangeCondition_BetweenDetected(t *testing.T) {
-	executor := newOrderShopTableExecutor(10)
+	store := newOrderShopTableStore(10)
 
 	ctx := context.Background()
 	shopIdField := dbhelper.NewField[int64]("shop_id")
 	minShopId := int64(10000)
 	maxShopId := int64(99999)
-	_, err := executor.Find(ctx,
+	_, err := store.Find(ctx,
 		dbhelper.Q(shopIdField.Between(&minShopId, &maxShopId)), nil)
 
 	if err == nil {

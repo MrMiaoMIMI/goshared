@@ -8,7 +8,7 @@ import (
 	"github.com/MrMiaoMIMI/goshared/db/dbspi"
 )
 
-var shardingExecutorCache sync.Map
+var shardingTableStoreCache sync.Map
 
 func defaultTestDatabaseGroupConfig() dbspi.DatabaseGroupConfig {
 	return dbspi.DatabaseGroupConfig{
@@ -53,23 +53,23 @@ func testNamedServer(key string) dbspi.NamedServerConfig {
 	}
 }
 
-func managedExecutor[T dbspi.Entity](entity T, entry dbspi.DatabaseGroupConfig) dbspi.Executor[T] {
+func managedTableStore[T dbspi.Entity](entity T, entry dbspi.DatabaseGroupConfig) dbspi.TableStore[T] {
 	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: defaultTestDatabaseGroupConfig(),
 			"order_dbs":                   entry,
 		},
 	})
-	return dbhelper.NewExecutor(entity, dbhelper.WithManager(mgr))
+	return dbhelper.NewTableStore(entity, dbhelper.WithManager(mgr))
 }
 
-func cachedManagedExecutor[T dbspi.Entity](key string, entity T, entry dbspi.DatabaseGroupConfig) dbspi.Executor[T] {
-	if cached, ok := shardingExecutorCache.Load(key); ok {
-		return cached.(dbspi.Executor[T])
+func cachedManagedTableStore[T dbspi.Entity](key string, entity T, entry dbspi.DatabaseGroupConfig) dbspi.TableStore[T] {
+	if cached, ok := shardingTableStoreCache.Load(key); ok {
+		return cached.(dbspi.TableStore[T])
 	}
-	exec := managedExecutor(entity, entry)
-	actual, _ := shardingExecutorCache.LoadOrStore(key, exec)
-	return actual.(dbspi.Executor[T])
+	store := managedTableStore(entity, entry)
+	actual, _ := shardingTableStoreCache.LoadOrStore(key, store)
+	return actual.(dbspi.TableStore[T])
 }
 
 func tableShardConfig(nameExpr string, expandExprs ...string) *dbspi.TableShardingConfig {
@@ -97,11 +97,11 @@ func orderShopTableEntry(count int) dbspi.DatabaseGroupConfig {
 	return entry
 }
 
-func newOrderShopTableExecutor(count int) dbspi.Executor[*Order] {
-	return cachedManagedExecutor(fmt.Sprintf("order-shop-table:%d", count), &Order{}, orderShopTableEntry(count))
+func newOrderShopTableStore(count int) dbspi.TableStore[*Order] {
+	return cachedManagedTableStore(fmt.Sprintf("order-shop-table:%d", count), &Order{}, orderShopTableEntry(count))
 }
 
-func newOrderIDTableExecutor(count int) dbspi.Executor[*Order] {
+func newOrderIDTableStore(count int) dbspi.TableStore[*Order] {
 	entry := singleTestDatabaseGroupConfig()
 	entry.TableSharding = tableShardConfig(
 		"order_tab_${index}",
@@ -109,10 +109,10 @@ func newOrderIDTableExecutor(count int) dbspi.Executor[*Order] {
 		fmt.Sprintf("${idx} = @{id} %% %d", count),
 		"${index} = fill(${idx}, 8)",
 	)
-	return cachedManagedExecutor(fmt.Sprintf("order-id-table:%d", count), &Order{}, entry)
+	return cachedManagedTableStore(fmt.Sprintf("order-id-table:%d", count), &Order{}, entry)
 }
 
-func newOrderDbTableExecutor() dbspi.Executor[*Order] {
+func newOrderDbTableStore() dbspi.TableStore[*Order] {
 	entry := orderShopTableEntry(10)
 	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("0"),
@@ -124,10 +124,10 @@ func newOrderDbTableExecutor() dbspi.Executor[*Order] {
 		"${idx} := range(0, 2)",
 		"${idx} = @{shop_id} % 2",
 	)
-	return cachedManagedExecutor("order-db-table", &Order{}, entry)
+	return cachedManagedTableStore("order-db-table", &Order{}, entry)
 }
 
-func newOrderNamedDbTableExecutor() dbspi.Executor[*Order] {
+func newOrderNamedDbTableStore() dbspi.TableStore[*Order] {
 	entry := orderShopTableEntry(10)
 	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("order_SG_db"),
@@ -139,10 +139,10 @@ func newOrderNamedDbTableExecutor() dbspi.Executor[*Order] {
 		"${region} := enum(SG, TH)",
 		"${region} = @{region}",
 	)
-	return cachedManagedExecutor("order-named-db-table", &Order{}, entry)
+	return cachedManagedTableStore("order-named-db-table", &Order{}, entry)
 }
 
-func newOrderRegionDbExecutor() dbspi.Executor[*Order] {
+func newOrderRegionDbTableStore() dbspi.TableStore[*Order] {
 	entry := singleTestDatabaseGroupConfig()
 	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("order_SG_db"),
@@ -154,10 +154,10 @@ func newOrderRegionDbExecutor() dbspi.Executor[*Order] {
 		"${region} := enum(SG, TH)",
 		"${region} = @{region}",
 	)
-	return cachedManagedExecutor("order-region-db", &Order{}, entry)
+	return cachedManagedTableStore("order-region-db", &Order{}, entry)
 }
 
-func newRegionalOrderCompositeExecutor() dbspi.Executor[*RegionalOrder] {
+func newRegionalOrderCompositeTableStore() dbspi.TableStore[*RegionalOrder] {
 	entry := singleTestDatabaseGroupConfig()
 	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("SG"),
@@ -175,10 +175,10 @@ func newRegionalOrderCompositeExecutor() dbspi.Executor[*RegionalOrder] {
 		"${idx} = @{shop_id} % 10",
 		"${index} = fill(${idx}, 8)",
 	)
-	return cachedManagedExecutor("regional-order-composite", &RegionalOrder{}, entry)
+	return cachedManagedTableStore("regional-order-composite", &RegionalOrder{}, entry)
 }
 
-func newOrderRegionRequiredExecutor() dbspi.Executor[*Order] {
+func newOrderRegionRequiredTableStore() dbspi.TableStore[*Order] {
 	entry := singleTestDatabaseGroupConfig()
 	entry.Servers = []dbspi.NamedServerConfig{
 		testNamedServer("SG"),
@@ -196,10 +196,10 @@ func newOrderRegionRequiredExecutor() dbspi.Executor[*Order] {
 		"${idx} = @{shop_id} % 10",
 		"${index} = fill(${idx}, 8)",
 	)
-	return cachedManagedExecutor("order-region-required", &Order{}, entry)
+	return cachedManagedTableStore("order-region-required", &Order{}, entry)
 }
 
-func newTableVarExecutor[T dbspi.Entity](entity T, count int) dbspi.Executor[T] {
+func newTableVarTableStore[T dbspi.Entity](entity T, count int) dbspi.TableStore[T] {
 	entry := singleTestDatabaseGroupConfig()
 	entry.TableSharding = tableShardConfig(
 		"${table}_${index}",
@@ -207,5 +207,5 @@ func newTableVarExecutor[T dbspi.Entity](entity T, count int) dbspi.Executor[T] 
 		fmt.Sprintf("${idx} = @{shop_id} %% %d", count),
 		"${index} = fill(${idx}, 8)",
 	)
-	return cachedManagedExecutor(fmt.Sprintf("table-var:%s:%d", entity.TableName(), count), entity, entry)
+	return cachedManagedTableStore(fmt.Sprintf("table-var:%s:%d", entity.TableName(), count), entity, entry)
 }

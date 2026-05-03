@@ -30,7 +30,7 @@ type TableShardEnumerator interface {
 
 // ShardingKeyColumnsProvider is an optional interface that sharding rules can
 // implement to declare which @{column} names they require. Used by sharded
-// executors to auto-extract sharding keys from CRUD parameters.
+// table stores to auto-extract sharding keys from CRUD parameters.
 type ShardingKeyColumnsProvider interface {
 	RequiredColumns() []string
 }

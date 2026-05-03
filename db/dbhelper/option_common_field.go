@@ -47,7 +47,7 @@ func (f commonFieldOptionFunc) applyManagerOption(o *managerOptions) {
 	f(&o.commonFields)
 }
 
-func (f commonFieldOptionFunc) applyExecutorOption(o *executorOptions) {
+func (f commonFieldOptionFunc) applyTableStoreOption(o *tableStoreOptions) {
 	f(&o.commonFields)
 }
 

@@ -22,11 +22,11 @@ func DefaultManager() dbspi.Manager {
 	return dbsp.DefaultManager()
 }
 
-// NewExecutor creates an Executor for the given entity using the Manager.
-func NewExecutor[T dbspi.Entity](entity T, opts ...ExecutorOption) dbspi.Executor[T] {
-	options := resolveExecutorOptions(opts)
+// NewTableStore creates a TableStore for the given entity using the Manager.
+func NewTableStore[T dbspi.Entity](entity T, opts ...TableStoreOption) dbspi.TableStore[T] {
+	options := resolveTableStoreOptions(opts)
 	if options.setTx {
-		return newTxExecutor(entity, options.tx, options.commonFields)
+		return newTxTableStore(entity, options.tx, options.commonFields)
 	}
 
 	mgr := asInternalManager(options.manager)
@@ -37,11 +37,11 @@ func NewExecutor[T dbspi.Entity](entity T, opts ...ExecutorOption) dbspi.Executo
 	return dbsp.ForWithCommonFieldAutoFill(entity, mgr, commonFields)
 }
 
-// NewEnhancedExecutor creates an EnhancedExecutor for the given entity using the Manager.
-func NewEnhancedExecutor[T dbspi.Entity](entity T, opts ...ExecutorOption) dbspi.EnhancedExecutor[T] {
-	options := resolveExecutorOptions(opts)
+// NewSoftDeleteTableStore creates a SoftDeleteTableStore for the given entity using the Manager.
+func NewSoftDeleteTableStore[T dbspi.Entity](entity T, opts ...TableStoreOption) dbspi.SoftDeleteTableStore[T] {
+	options := resolveTableStoreOptions(opts)
 	if options.setTx {
-		return newTxEnhancedExecutor(entity, options.tx, options.commonFields)
+		return newTxSoftDeleteTableStore(entity, options.tx, options.commonFields)
 	}
 
 	mgr := asInternalManager(options.manager)
@@ -49,7 +49,16 @@ func NewEnhancedExecutor[T dbspi.Entity](entity T, opts ...ExecutorOption) dbspi
 		mgr = dbsp.DefaultManager()
 	}
 	commonFields := options.commonFields.apply(mgr.CommonFieldAutoFillOptions())
-	return dbsp.ForEnhanceWithCommonFieldAutoFill(entity, mgr, commonFields)
+	return dbsp.ForSoftDeleteWithCommonFieldAutoFill(entity, mgr, commonFields)
+}
+
+// AsSQLTableStore exposes advanced raw SQL support when store supports it.
+//
+// Prefer TableStore methods for regular business reads and writes. For sharded
+// tables, route raw SQL explicitly with Shard or pass a dbspi.ShardingKey in ctx.
+func AsSQLTableStore[T dbspi.Entity](store dbspi.TableStore[T]) (dbspi.SQLTableStore[T], bool) {
+	sqlStore, ok := store.(dbspi.SQLTableStore[T])
+	return sqlStore, ok
 }
 
 func resolveManagerOptions(opts []ManagerOption) managerOptions {
@@ -62,11 +71,11 @@ func resolveManagerOptions(opts []ManagerOption) managerOptions {
 	return options
 }
 
-func resolveExecutorOptions(opts []ExecutorOption) executorOptions {
-	var options executorOptions
+func resolveTableStoreOptions(opts []TableStoreOption) tableStoreOptions {
+	var options tableStoreOptions
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyExecutorOption(&options)
+			opt.applyTableStoreOption(&options)
 		}
 	}
 	return options

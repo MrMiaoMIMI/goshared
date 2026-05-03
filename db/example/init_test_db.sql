@@ -72,7 +72,7 @@ SET @order_detail_cols = '`id` BIGINT NOT NULL AUTO_INCREMENT, `order_id` BIGINT
 
 -- ############################################################
 -- 1. Database: my_test
---    Used by: testDbManager() in all test files, plus
+--    Used by: testManager() in all test files, plus
 --             Config/Builder single-server tests (table-only sharding)
 -- ############################################################
 
@@ -134,7 +134,7 @@ INSERT INTO `users` (`id`, `name`, `email`, `age`, `status`, `deleted`) VALUES
 
 -- ############################################################
 -- 2. Database: my_app_db
---    Used by: DbManager tests (default entry)
+--    Used by: Manager tests (default entry)
 --    Kept separate from my_test for data isolation —
 --    other tests modify my_test.dbspi_test_user_tab.
 -- ############################################################
@@ -166,7 +166,7 @@ INSERT INTO `dbspi_test_user_tab` (`id`, `name`, `email`, `age`, `status`, `dele
 -- ############################################################
 -- 3. Databases: order_db_0, order_db_1
 --    Used by: DB+Table sharding tests, MultiServer tests,
---             DbManager sharded entries
+--             Manager sharded entries
 --    Each DB contains:
 --      order_tab_00000000 ~ 00000009         (10 tables)
 --      order_item_tab_00000000 ~ 00000009    (10 tables)

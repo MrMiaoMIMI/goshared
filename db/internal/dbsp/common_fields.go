@@ -92,7 +92,7 @@ func applyUpdateCommonFieldsToUpdater(ctx context.Context, opts CommonFieldAutoF
 		return
 	}
 	opts = opts.Normalize()
-	params := updater.Values()
+	params, _ := readUpdaterValues(updater)
 
 	if managed, ok := model.(dbspi.UpdateTimeAccessor); ok {
 		fieldName := managed.MtimeFieldName()

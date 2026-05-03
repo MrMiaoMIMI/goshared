@@ -27,12 +27,13 @@ func (t _tableForCheck) IdFieldName() string {
 
 var (
 	// Check external interfaces
-	_ dbspi.Condition                = (*GormCondition)(nil)
-	_ dbspi.Column                   = (*GormColumn)(nil)
-	_ dbspi.Field[any]               = (*GormField[any])(nil)
-	_ dbspi.Query                    = (*GormQuery)(nil)
-	_ dbspi.Updater                  = (*GormUpdater)(nil)
-	_ dbspi.Executor[_tableForCheck] = new(GormExecutor[_tableForCheck])
+	_ dbspi.Condition                     = (*GormCondition)(nil)
+	_ dbspi.Column                        = (*GormColumn)(nil)
+	_ dbspi.Field[any]                    = (*GormField[any])(nil)
+	_ dbspi.Query                         = (*GormQuery)(nil)
+	_ dbspi.Updater                       = (*GormUpdater)(nil)
+	_ dbspi.TableStore[_tableForCheck]    = new(GormTableStore[_tableForCheck])
+	_ dbspi.SQLTableStore[_tableForCheck] = new(GormTableStore[_tableForCheck])
 
 	// Check internal interfaces
 	_ gormExpression = (*GormCondition)(nil)
@@ -343,24 +344,24 @@ func NewQuery(conditions ...dbspi.Condition) dbspi.Query {
 	return newQuery(keywordAnd, conditions...)
 }
 
-type selectQuery interface {
+type columnSelectionQuery interface {
 	dbspi.Query
 	Columns() []dbspi.Column
 }
 
-// GormSelectQuery implements selectQuery.
-type GormSelectQuery struct {
+// gormColumnSelectionQuery implements columnSelectionQuery.
+type gormColumnSelectionQuery struct {
 	*GormQuery
 	columns []dbspi.Column
 }
 
-func (q *GormSelectQuery) Columns() []dbspi.Column {
+func (q *gormColumnSelectionQuery) Columns() []dbspi.Column {
 	return q.columns
 }
 
 // Select wraps a query with specific column selection.
 func Select(columns []dbspi.Column, conditions ...dbspi.Condition) dbspi.Query {
-	return &GormSelectQuery{
+	return &gormColumnSelectionQuery{
 		GormQuery: &GormQuery{keyword: keywordAnd, conditions: conditions},
 		columns:   columns,
 	}
@@ -393,7 +394,8 @@ func (q *GormQuery) ToGormExpression() clause.Expression {
 			}
 			gormExpressions = append(gormExpressions, gc.ToGormExpression())
 		} else {
-			// TODO: Warning or error log ?
+			// Unknown condition implementations are ignored so custom query
+			// builders can opt out by not mapping to GORM expressions.
 			continue
 		}
 	}
@@ -415,7 +417,7 @@ func (q *GormQuery) ToGormExpression() clause.Expression {
 
 // extractEqColumns collects column values from Eq and IN conditions.
 // Multiple values per column are allowed; deduplication and validation
-// happen later in the sharding executor.
+// happen later in the sharded table store.
 // Range conditions (Gt/Gte/Lt/Lte) are recorded in rangeCols for diagnostics.
 func (c *GormCondition) extractEqColumns(out map[string][]any, rangeCols map[string]bool) {
 	switch expr := c.expr.(type) {
@@ -477,7 +479,7 @@ func (q *GormQuery) extractEqColumns(out map[string][]any, rangeCols map[string]
 			c.extractEqColumns(out, rangeCols)
 		case *GormQuery:
 			c.extractEqColumns(out, rangeCols)
-		case *GormSelectQuery:
+		case *gormColumnSelectionQuery:
 			c.GormQuery.extractEqColumns(out, rangeCols)
 		}
 	}
@@ -496,7 +498,7 @@ func ExtractColumnsFromQuery(query dbspi.Query) (values map[string][]any, rangeC
 	switch q := query.(type) {
 	case *GormQuery:
 		q.extractEqColumns(values, rangeCols)
-	case *GormSelectQuery:
+	case *gormColumnSelectionQuery:
 		q.GormQuery.extractEqColumns(values, rangeCols)
 	}
 	return values, rangeCols
@@ -538,58 +540,77 @@ func (u *GormUpdater) Remove(column dbspi.Column) dbspi.Updater {
 	return u
 }
 
-// Values implements dbspi.Updater.
 func (u *GormUpdater) Values() map[string]any {
 	return u.updates
 }
 
-// ================== Executor Implementation ==================
+type updaterValueReader interface {
+	Values() map[string]any
+}
 
-// GormExecutor implements dbspi.Executor[T]
-type GormExecutor[T dbspi.Entity] struct {
+func readUpdaterValues(updater dbspi.Updater) (map[string]any, bool) {
+	reader, ok := updater.(updaterValueReader)
+	if !ok {
+		return nil, false
+	}
+	return reader.Values(), true
+}
+
+func requireUpdaterValues(updater dbspi.Updater) (map[string]any, error) {
+	values, ok := readUpdaterValues(updater)
+	if !ok {
+		return nil, fmt.Errorf("dbhelper: unsupported updater implementation; use dbhelper.NewUpdater")
+	}
+	return values, nil
+}
+
+// ================== TableStore Implementation ==================
+
+// GormTableStore implements dbspi.TableStore[T]
+type GormTableStore[T dbspi.Entity] struct {
 	db                  dbSession
 	emptyEntityInstance T
 	commonFields        CommonFieldAutoFillOptions
 }
 
-// NewExecutor creates a new GormExecutor with the given entity instance
+// NewTableStore creates a new GormTableStore with the given entity instance
 // Example:
-// NewExecutor(db, &User{})
-func NewExecutor[T dbspi.Entity](db dbSession, entityInstance T) *GormExecutor[T] {
-	return NewExecutorWithTableName(db, entityInstance, entityInstance.TableName())
+// NewTableStore(db, &User{})
+func NewTableStore[T dbspi.Entity](db dbSession, entityInstance T) *GormTableStore[T] {
+	return NewTableStoreWithTableName(db, entityInstance, entityInstance.TableName())
 }
 
-func NewExecutorWithCommonFieldAutoFill[T dbspi.Entity](db dbSession, entityInstance T, commonFields CommonFieldAutoFillOptions) *GormExecutor[T] {
-	return newExecutorWithTableName(db, entityInstance, entityInstance.TableName(), commonFields)
+func NewTableStoreWithCommonFieldAutoFill[T dbspi.Entity](db dbSession, entityInstance T, commonFields CommonFieldAutoFillOptions) *GormTableStore[T] {
+	return newTableStoreWithTableName(db, entityInstance, entityInstance.TableName(), commonFields)
 }
 
-// Shard is a no-op for non-sharded executor, returns self.
-func (e *GormExecutor[T]) Shard(_ *dbspi.ShardingKey) (dbspi.Executor[T], error) {
+// Shard is a no-op for a non-sharded table store and returns self.
+func (e *GormTableStore[T]) Shard(_ *dbspi.ShardingKey) (dbspi.TableStore[T], error) {
 	return e, nil
 }
 
-// FindAll is equivalent to Find for non-sharded executor.
-func (e *GormExecutor[T]) FindAll(ctx context.Context, query dbspi.Query, batchSize int) ([]T, error) {
+// FindAll is equivalent to Find for a non-sharded table store.
+func (e *GormTableStore[T]) FindAll(ctx context.Context, query dbspi.Query, batchSize int) ([]T, error) {
 	return e.Find(ctx, query, nil)
 }
 
-// CountAll is equivalent to Count for non-sharded executor.
-func (e *GormExecutor[T]) CountAll(ctx context.Context, query dbspi.Query) (uint64, error) {
+// CountAll is equivalent to Count for a non-sharded table store.
+func (e *GormTableStore[T]) CountAll(ctx context.Context, query dbspi.Query) (uint64, error) {
 	return e.Count(ctx, query)
 }
 
-// NewExecutorWithTableName creates a new GormExecutor with the given entity instance and table name
+// NewTableStoreWithTableName creates a new GormTableStore with the given entity instance and table name
 // Example:
-// NewExecutorWithTableName(db, &User{}, "user_tab_00000001")
-func NewExecutorWithTableName[T dbspi.Entity](db dbSession, entityInstance T, tableName string) *GormExecutor[T] {
-	return newExecutorWithTableName(db, entityInstance, tableName, DisabledCommonFieldAutoFillOptions())
+// NewTableStoreWithTableName(db, &User{}, "user_tab_00000001")
+func NewTableStoreWithTableName[T dbspi.Entity](db dbSession, entityInstance T, tableName string) *GormTableStore[T] {
+	return newTableStoreWithTableName(db, entityInstance, tableName, DisabledCommonFieldAutoFillOptions())
 }
 
-func NewExecutorWithTableNameAndCommonFields[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields CommonFieldAutoFillOptions) *GormExecutor[T] {
-	return newExecutorWithTableName(db, entityInstance, tableName, commonFields)
+func NewTableStoreWithTableNameAndCommonFields[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields CommonFieldAutoFillOptions) *GormTableStore[T] {
+	return newTableStoreWithTableName(db, entityInstance, tableName, commonFields)
 }
 
-func newExecutorWithTableName[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields CommonFieldAutoFillOptions) *GormExecutor[T] {
+func newTableStoreWithTableName[T dbspi.Entity](db dbSession, entityInstance T, tableName string, commonFields CommonFieldAutoFillOptions) *GormTableStore[T] {
 	if any(entityInstance) == nil {
 		panic("entityInstance is nil")
 	}
@@ -600,21 +621,21 @@ func newExecutorWithTableName[T dbspi.Entity](db dbSession, entityInstance T, ta
 	// New a empty entity instance
 	entity := reflect.New(reflect.TypeOf(reflect.ValueOf(entityInstance).Elem().Interface())).Interface()
 	db = db.WithModel(entity).WithTableName(tableName)
-	return &GormExecutor[T]{
+	return &GormTableStore[T]{
 		db:                  db,
 		emptyEntityInstance: entity.(T),
 		commonFields:        commonFields,
 	}
 }
 
-// GetById implements dbspi.Executor
-func (e *GormExecutor[T]) GetById(ctx context.Context, id any) (T, error) {
+// GetById implements dbspi.TableStore
+func (e *GormTableStore[T]) GetById(ctx context.Context, id any) (T, error) {
 	_, entity, err := e.ExistsById(ctx, id)
 	return entity, err
 }
 
-// ExistsById implements dbspi.Executor
-func (e *GormExecutor[T]) ExistsById(ctx context.Context, id any) (bool, T, error) {
+// ExistsById implements dbspi.TableStore
+func (e *GormTableStore[T]) ExistsById(ctx context.Context, id any) (bool, T, error) {
 	var entity T
 	if id == nil {
 		return false, entity, nil
@@ -629,25 +650,25 @@ func (e *GormExecutor[T]) ExistsById(ctx context.Context, id any) (bool, T, erro
 	return true, entities[0], nil
 }
 
-// UpdateById implements dbspi.Executor
-func (e *GormExecutor[T]) UpdateById(ctx context.Context, id any, updater dbspi.Updater) error {
+// UpdateById implements dbspi.TableStore
+func (e *GormTableStore[T]) UpdateById(ctx context.Context, id any, updater dbspi.Updater) error {
 	return e.UpdateByQuery(ctx, e.buildQueryById(id), updater)
 }
 
-// DeleteById implements dbspi.Executor
-func (e *GormExecutor[T]) DeleteById(ctx context.Context, id any) error {
+// DeleteById implements dbspi.TableStore
+func (e *GormTableStore[T]) DeleteById(ctx context.Context, id any) error {
 	return e.DeleteByQuery(ctx, e.buildQueryById(id))
 }
 
-// Find implements dbspi.Executor
-func (e *GormExecutor[T]) Find(ctx context.Context, query dbspi.Query, pagination dbspi.Pagination) ([]T, error) {
+// Find implements dbspi.TableStore
+func (e *GormTableStore[T]) Find(ctx context.Context, query dbspi.Query, pagination dbspi.Pagination) ([]T, error) {
 	var results []T
 	err := e.db.Find(ctx, &results, query, pagination)
 	return results, err
 }
 
-// Exists implements dbspi.Executor
-func (e *GormExecutor[T]) Exists(ctx context.Context, query dbspi.Query) (bool, T, error) {
+// Exists implements dbspi.TableStore
+func (e *GormTableStore[T]) Exists(ctx context.Context, query dbspi.Query) (bool, T, error) {
 	var entity T
 	limit := 1
 	paginationConfig := NewPagination().WithLimit(&limit)
@@ -661,79 +682,79 @@ func (e *GormExecutor[T]) Exists(ctx context.Context, query dbspi.Query) (bool, 
 	return true, entities[0], nil
 }
 
-// Count implements dbspi.Executor
-func (e *GormExecutor[T]) Count(ctx context.Context, query dbspi.Query) (uint64, error) {
+// Count implements dbspi.TableStore
+func (e *GormTableStore[T]) Count(ctx context.Context, query dbspi.Query) (uint64, error) {
 	return e.db.Count(ctx, query)
 }
 
-// Create implements dbspi.Executor
-func (e *GormExecutor[T]) Create(ctx context.Context, value T) error {
+// Create implements dbspi.TableStore
+func (e *GormTableStore[T]) Create(ctx context.Context, value T) error {
 	applyCreateCommonFields(ctx, e.commonFields, value)
 	return e.db.Create(ctx, value)
 }
 
-// Save implements dbspi.Executor
-func (e *GormExecutor[T]) Save(ctx context.Context, value T) error {
+// Save implements dbspi.TableStore
+func (e *GormTableStore[T]) Save(ctx context.Context, value T) error {
 	applySaveCommonFields(ctx, e.commonFields, value)
 	return e.db.Save(ctx, value)
 }
 
-// Update implements dbspi.Executor
-func (e *GormExecutor[T]) Update(ctx context.Context, entity T) error {
+// Update implements dbspi.TableStore
+func (e *GormTableStore[T]) Update(ctx context.Context, entity T) error {
 	applyUpdateCommonFields(ctx, e.commonFields, entity)
 	return e.db.Update(ctx, entity)
 }
 
-// Delete implements dbspi.Executor
-func (e *GormExecutor[T]) Delete(ctx context.Context, entity T) error {
+// Delete implements dbspi.TableStore
+func (e *GormTableStore[T]) Delete(ctx context.Context, entity T) error {
 	return e.db.Delete(ctx, entity)
 }
 
-// UpdateByQuery implements dbspi.Executor
-func (e *GormExecutor[T]) UpdateByQuery(ctx context.Context, query dbspi.Query, updater dbspi.Updater) error {
+// UpdateByQuery implements dbspi.TableStore
+func (e *GormTableStore[T]) UpdateByQuery(ctx context.Context, query dbspi.Query, updater dbspi.Updater) error {
 	applyUpdateCommonFieldsToUpdater(ctx, e.commonFields, e.emptyEntityInstance, updater)
 	return e.db.UpdateByQuery(ctx, query, updater)
 }
 
-// DeleteByQuery implements dbspi.Executor
-func (e *GormExecutor[T]) DeleteByQuery(ctx context.Context, query dbspi.Query) error {
+// DeleteByQuery implements dbspi.TableStore
+func (e *GormTableStore[T]) DeleteByQuery(ctx context.Context, query dbspi.Query) error {
 	return e.db.DeleteByQuery(ctx, e.emptyEntityInstance, query)
 }
 
-// BatchCreate implements dbspi.Executor
-func (e *GormExecutor[T]) BatchCreate(ctx context.Context, entities []T, batchSize int) error {
+// BatchCreate implements dbspi.TableStore
+func (e *GormTableStore[T]) BatchCreate(ctx context.Context, entities []T, batchSize int) error {
 	applyCreateCommonFieldsToSlice(ctx, e.commonFields, entities)
 	err := e.db.BatchCreate(ctx, entities, batchSize)
 	return err
 }
 
-// BatchSave implements dbspi.Executor
-func (e *GormExecutor[T]) BatchSave(ctx context.Context, entities []T) error {
+// BatchSave implements dbspi.TableStore
+func (e *GormTableStore[T]) BatchSave(ctx context.Context, entities []T) error {
 	applySaveCommonFieldsToSlice(ctx, e.commonFields, entities)
 	err := e.db.BatchSave(ctx, entities)
 	return err
 }
 
-// FirstOrCreate implements dbspi.Executor
-func (e *GormExecutor[T]) FirstOrCreate(ctx context.Context, entity T, query dbspi.Query) (T, error) {
+// FirstOrCreate implements dbspi.TableStore
+func (e *GormTableStore[T]) FirstOrCreate(ctx context.Context, entity T, query dbspi.Query) (T, error) {
 	applyCreateCommonFields(ctx, e.commonFields, entity)
 	err := e.db.FirstOrCreate(ctx, entity, query)
 	return entity, err
 }
 
-// Raw implements dbspi.Executor
-func (e *GormExecutor[T]) Raw(ctx context.Context, sql string, args ...any) ([]T, error) {
+// Raw implements dbspi.SQLTableStore.
+func (e *GormTableStore[T]) Raw(ctx context.Context, sql string, args ...any) ([]T, error) {
 	var results []T
 	err := e.db.Raw(ctx, &results, sql, args...)
 	return results, err
 }
 
-// Exec implements dbspi.Executor
-func (e *GormExecutor[T]) Exec(ctx context.Context, sql string, args ...any) error {
+// Exec implements dbspi.SQLTableStore.
+func (e *GormTableStore[T]) Exec(ctx context.Context, sql string, args ...any) error {
 	return e.db.Exec(ctx, sql, args...)
 }
 
-func (e *GormExecutor[T]) buildQueryById(id any) dbspi.Query {
+func (e *GormTableStore[T]) buildQueryById(id any) dbspi.Query {
 	idFieldName := dbspi.DefaultIdFieldName
 	if namer, ok := any(e.emptyEntityInstance).(dbspi.IdFieldNameProvider); ok {
 		idFieldName = namer.IdFieldName()
@@ -832,7 +853,7 @@ func (d *GormDb) Find(ctx context.Context, dest any, query dbspi.Query, paginati
 		}
 	}
 
-	if sq, ok := query.(selectQuery); ok && len(sq.Columns()) > 0 {
+	if sq, ok := query.(columnSelectionQuery); ok && len(sq.Columns()) > 0 {
 		colNames := make([]string, len(sq.Columns()))
 		for i, c := range sq.Columns() {
 			colNames[i] = c.Name()
@@ -886,12 +907,16 @@ func (d *GormDb) Delete(ctx context.Context, entity dbspi.Entity) error {
 
 // UpdateByQuery implements dbSession
 func (d *GormDb) UpdateByQuery(ctx context.Context, query dbspi.Query, updater dbspi.Updater) error {
+	updates, err := requireUpdaterValues(updater)
+	if err != nil {
+		return err
+	}
 	db := d.db.WithContext(ctx)
 	gormClause := queryToGormClause(query)
 	if gormClause != nil {
 		db = db.Clauses(gormClause)
 	}
-	err := db.Updates(updater.Values()).Error
+	err = db.Updates(updates).Error
 	return err
 }
 

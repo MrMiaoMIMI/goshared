@@ -6,7 +6,7 @@ type managerOptions struct {
 	commonFields commonFieldPatch
 }
 
-type executorOptions struct {
+type tableStoreOptions struct {
 	manager      dbspi.Manager
 	tx           *Tx
 	setTx        bool
