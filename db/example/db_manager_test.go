@@ -48,7 +48,7 @@ func (*OrderDetail) IdFieldName() string      { return dbspi.DefaultIdFieldName 
 // ==================== Manager: Non-sharded ====================
 
 func Test_Manager_Simple(t *testing.T) {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
@@ -68,7 +68,7 @@ func Test_Manager_Simple(t *testing.T) {
 }
 
 func Test_Manager_NewSoftDeleteTableStore_Simple(t *testing.T) {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
@@ -90,7 +90,7 @@ func Test_Manager_NewSoftDeleteTableStore_Simple(t *testing.T) {
 // ==================== Manager: DSN mode ====================
 
 func Test_Manager_DSN(t *testing.T) {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				DSN:          testDSN(testAppDatabaseName),
@@ -112,7 +112,7 @@ func Test_Manager_DSN(t *testing.T) {
 // ==================== Manager: Sharded with reuse ====================
 
 func Test_Manager_ShardedWithReuse(t *testing.T) {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
@@ -162,7 +162,7 @@ func Test_Manager_ShardedWithReuse(t *testing.T) {
 // ==================== Manager: Named db sharding ====================
 
 func Test_Manager_NamedDatabaseSharding(t *testing.T) {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
@@ -195,7 +195,7 @@ func Test_Manager_NamedDatabaseSharding(t *testing.T) {
 // ==================== Manager: Global default ====================
 
 func Test_Manager_GlobalDefault(t *testing.T) {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,

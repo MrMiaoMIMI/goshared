@@ -768,12 +768,20 @@ type GormDb struct {
 
 // NewGormDb creates a new GormDb.
 func NewGormDb(dbConfig dbspi.ServerConfig) dbSession {
+	db, err := newGormDb(dbConfig)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+func newGormDb(dbConfig dbspi.ServerConfig) (dbSession, error) {
 	dbConfig = normalizeServerConfig(dbConfig)
 	gormCfg := &gorm.Config{}
 
 	db, err := gorm.Open(mysql.Open(dbServerDSN(dbConfig)), gormCfg)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	if dbConfig.Debug {
@@ -782,7 +790,7 @@ func NewGormDb(dbConfig dbspi.ServerConfig) dbSession {
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	if dbConfig.MaxOpenConns > 0 {
 		sqlDB.SetMaxOpenConns(dbConfig.MaxOpenConns)
@@ -796,7 +804,7 @@ func NewGormDb(dbConfig dbspi.ServerConfig) dbSession {
 
 	return &GormDb{
 		db: db,
-	}
+	}, nil
 }
 
 func normalizeServerConfig(cfg dbspi.ServerConfig) dbspi.ServerConfig {

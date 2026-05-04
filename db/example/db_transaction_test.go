@@ -111,7 +111,7 @@ func Test_Transaction_MultiTable_Rollback(t *testing.T) {
 
 func Test_Transaction_ShardedSameDb(t *testing.T) {
 	ctx := context.Background()
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: defaultTestDatabaseGroupConfig(),
 			"order_dbs":                   orderShopTableEntry(10),
@@ -144,7 +144,7 @@ func Test_Transaction_ShardedSameDb(t *testing.T) {
 
 func Test_Transaction_DbShardCrossShardRejected(t *testing.T) {
 	ctx := context.Background()
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: defaultTestDatabaseGroupConfig(),
 			"order_dbs": {

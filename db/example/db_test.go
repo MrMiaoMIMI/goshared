@@ -60,7 +60,7 @@ func NewUserFieldManager() *UserFieldManager {
 }
 
 func testManager(dbName string) dbspi.Manager {
-	return dbhelper.NewManager(dbspi.DatabaseConfig{
+	return mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				Host:         testDbHost,
@@ -72,6 +72,14 @@ func testManager(dbName string) dbspi.Manager {
 			},
 		},
 	})
+}
+
+func mustNewManager(cfg dbspi.DatabaseConfig, opts ...dbhelper.ManagerOption) dbspi.Manager {
+	mgr, err := dbhelper.NewManager(cfg, opts...)
+	if err != nil {
+		panic(err)
+	}
+	return mgr
 }
 
 func testDSN(dbName string) string {

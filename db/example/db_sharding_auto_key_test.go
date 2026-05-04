@@ -567,7 +567,7 @@ func Test_AutoKey_NilQuery_MissingColumn(t *testing.T) {
 // ==================== Manager + auto-extract ====================
 
 func Test_AutoKey_Manager_CreateWithoutExplicitKey(t *testing.T) {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword, Debug: true,
@@ -595,7 +595,7 @@ func Test_AutoKey_Manager_CreateWithoutExplicitKey(t *testing.T) {
 }
 
 func Test_AutoKey_Manager_FindWithQuery(t *testing.T) {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,
@@ -658,7 +658,7 @@ func Test_TableVar_DifferentEntitiesSameRule(t *testing.T) {
 }
 
 func Test_TableVar_TableRuleInheritNameExpr(t *testing.T) {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: {
 				Host: testDbHost, Port: testDbPort, User: testDbUser, Password: testDbPassword,

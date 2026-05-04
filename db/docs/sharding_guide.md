@@ -333,7 +333,10 @@ var cfg dbspi.DatabaseConfig
 yaml.Unmarshal(configBytes, &cfg)
 
 // 创建 Manager
-mgr := dbhelper.NewManager(cfg)
+mgr, err := dbhelper.NewManager(cfg)
+if err != nil {
+    return err
+}
 
 // 获取 TableStore
 userStore := dbhelper.NewTableStore(&User{}, dbhelper.WithManager(mgr))     // → dbspi.DefaultDatabaseGroupKey 库
@@ -765,7 +768,10 @@ func main() {
     yaml.Unmarshal(data, &cfg)
 
     // 2. 初始化 Manager
-    mgr := dbhelper.NewManager(cfg)
+    mgr, err := dbhelper.NewManager(cfg)
+    if err != nil {
+        return err
+    }
 
     // 3. 获取 TableStore
     userStore := dbhelper.NewTableStore(&User{}, dbhelper.WithManager(mgr))

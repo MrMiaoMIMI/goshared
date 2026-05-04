@@ -54,7 +54,7 @@ func testNamedServer(key string) dbspi.NamedServerConfig {
 }
 
 func managedTableStore[T dbspi.Entity](entity T, entry dbspi.DatabaseGroupConfig) dbspi.TableStore[T] {
-	mgr := dbhelper.NewManager(dbspi.DatabaseConfig{
+	mgr := mustNewManager(dbspi.DatabaseConfig{
 		DatabaseGroups: map[string]dbspi.DatabaseGroupConfig{
 			dbspi.DefaultDatabaseGroupKey: defaultTestDatabaseGroupConfig(),
 			"order_dbs":                   entry,

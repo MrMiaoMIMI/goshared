@@ -237,19 +237,31 @@ func NewShardedTableStoreFromConfig[T dbspi.Entity](entity T, cfg ShardingConfig
 }
 
 func newDbFromServer(server dbspi.ServerConfig, dbName string) dbSession {
+	db, err := newDbFromServerE(server, dbName)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+func newDbFromServerE(server dbspi.ServerConfig, dbName string) (dbSession, error) {
 	if server.DSN == "" && dbName != "" {
 		server.DatabaseName = dbName
 	}
-	return NewGormDb(server)
+	return newGormDb(server)
 }
 
 func buildDatabaseTargets(cfg ShardingConfig) ([]DatabaseTarget, error) {
 	if len(cfg.Servers) > 0 {
 		targets := make([]DatabaseTarget, len(cfg.Servers))
 		for i, s := range cfg.Servers {
+			db, err := newDbFromServerE(s.ServerConfig, s.DatabaseName)
+			if err != nil {
+				return nil, fmt.Errorf("server %q: %w", s.Key, err)
+			}
 			targets[i] = DatabaseTarget{
 				Key: s.Key,
-				Db:  newDbFromServer(s.ServerConfig, s.DatabaseName),
+				Db:  db,
 			}
 		}
 		return targets, nil
@@ -279,15 +291,23 @@ func buildDatabaseTargets(cfg ShardingConfig) ([]DatabaseTarget, error) {
 
 		targets := make([]DatabaseTarget, len(dbNames))
 		for i, name := range dbNames {
+			db, err := newDbFromServerE(*cfg.Server, name)
+			if err != nil {
+				return nil, fmt.Errorf("database %q: %w", name, err)
+			}
 			targets[i] = DatabaseTarget{
 				Key: name,
-				Db:  newDbFromServer(*cfg.Server, name),
+				Db:  db,
 			}
 		}
 		return targets, nil
 	}
 
-	return SingleDb(newDbFromServer(*cfg.Server, cfg.Server.DatabaseName)), nil
+	db, err := newDbFromServerE(*cfg.Server, cfg.Server.DatabaseName)
+	if err != nil {
+		return nil, err
+	}
+	return SingleDb(db), nil
 }
 
 func buildDbRule(cfg *dbspi.DatabaseShardingConfig) (DatabaseShardingRule, error) {
@@ -483,16 +503,27 @@ var (
 	defaultManagerMu sync.RWMutex
 )
 
-// NewManager creates a new Manager from the given configuration.
-func NewManager(cfg dbspi.DatabaseConfig, commonFields CommonFieldAutoFillOptions) *Manager {
+// NewManager validates cfg and initializes database sessions and sharding rules.
+func NewManager(cfg dbspi.DatabaseConfig, commonFields CommonFieldAutoFillOptions) (*Manager, error) {
+	if len(cfg.DatabaseGroups) == 0 {
+		return nil, fmt.Errorf("dbhelper: DatabaseConfig.DatabaseGroups is empty")
+	}
+
 	mgr := &Manager{
 		entries:      make(map[string]*resolvedDbEntry, len(cfg.DatabaseGroups)),
 		commonFields: commonFields.Normalize(),
 	}
 	for name, entry := range cfg.DatabaseGroups {
-		mgr.entries[name] = resolveDbEntry(entry)
+		if name == "" {
+			return nil, fmt.Errorf("dbhelper: database group key is empty")
+		}
+		resolved, err := resolveDbEntry(entry)
+		if err != nil {
+			return nil, fmt.Errorf("dbhelper: database group %q: %w", name, err)
+		}
+		mgr.entries[name] = resolved
 	}
-	return mgr
+	return mgr, nil
 }
 
 // SetDefaultManager sets the global default Manager.
@@ -603,7 +634,11 @@ func ForSoftDeleteWithCommonFieldAutoFill[T dbspi.Entity](entity T, mgr *Manager
 	return softDeleteStore
 }
 
-func resolveDbEntry(entry dbspi.DatabaseGroupConfig) *resolvedDbEntry {
+func resolveDbEntry(entry dbspi.DatabaseGroupConfig) (*resolvedDbEntry, error) {
+	if err := validateDatabaseGroupConfig(entry); err != nil {
+		return nil, err
+	}
+
 	resolved := &resolvedDbEntry{
 		entityOverrides: make(map[string]*entityOverride),
 		maxConcurrency:  entry.MaxConcurrency,
@@ -613,7 +648,7 @@ func resolveDbEntry(entry dbspi.DatabaseGroupConfig) *resolvedDbEntry {
 
 	if entry.DatabaseSharding != nil || len(entry.Servers) > 0 {
 		if entry.DatabaseSharding != nil && len(entry.Servers) == 0 && entry.DSN != "" {
-			panic("dbhelper: DSN cannot be used with database_sharding on a single server " +
+			return nil, fmt.Errorf("DSN cannot be used with database_sharding on a single server " +
 				"(DSN includes the database name). Use Host/Port/User/Password fields instead, " +
 				"or use the Servers list with per-server DSN")
 		}
@@ -628,24 +663,31 @@ func resolveDbEntry(entry dbspi.DatabaseGroupConfig) *resolvedDbEntry {
 		}
 		dbs, err := buildDatabaseTargets(shardCfg)
 		if err != nil {
-			panic(fmt.Sprintf("dbhelper: build db targets: %v", err))
+			return nil, fmt.Errorf("build db targets: %w", err)
 		}
 		resolved.dbs = dbs
 		if entry.DatabaseSharding != nil {
 			rule, err := buildDbRule(entry.DatabaseSharding)
 			if err != nil {
-				panic(fmt.Sprintf("dbhelper: build db rule: %v", err))
+				return nil, fmt.Errorf("build db rule: %w", err)
+			}
+			if err := validateDatabaseTargetsMatchRule(dbs, rule); err != nil {
+				return nil, err
 			}
 			resolved.dbRule = rule
 		}
 	} else {
-		resolved.db = newDbFromServer(serverCfg, entry.DatabaseName)
+		db, err := newDbFromServerE(serverCfg, entry.DatabaseName)
+		if err != nil {
+			return nil, fmt.Errorf("open database: %w", err)
+		}
+		resolved.db = db
 	}
 
 	if entry.TableSharding != nil {
 		rule, err := buildTableRule(entry.TableSharding)
 		if err != nil {
-			panic(fmt.Sprintf("dbhelper: build table rule: %v", err))
+			return nil, fmt.Errorf("build table rule: %w", err)
 		}
 		resolved.defaultTableRule = rule
 	}
@@ -663,7 +705,7 @@ func resolveDbEntry(entry dbspi.DatabaseGroupConfig) *resolvedDbEntry {
 			}
 			tableRule, err := buildTableRule(tsCfg)
 			if err != nil {
-				panic(fmt.Sprintf("dbhelper: build entity table rule: %v", err))
+				return nil, fmt.Errorf("build table rule override for %v: %w", rule.Tables, err)
 			}
 			override.tableRule = tableRule
 		}
@@ -672,7 +714,7 @@ func resolveDbEntry(entry dbspi.DatabaseGroupConfig) *resolvedDbEntry {
 		}
 	}
 
-	return resolved
+	return resolved, nil
 }
 
 func toServerConfig(entry dbspi.DatabaseGroupConfig) dbspi.ServerConfig {
