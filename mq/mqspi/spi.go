@@ -5,83 +5,64 @@ import (
 	"time"
 )
 
+// Producer sends messages to MQ.
+//
+// Produce and BatchProduce are synchronous. AsyncProduce only reports whether
+// the message entered the async producer; final delivery result is returned
+// through the callback.
 type Producer interface {
+	// Produce sends one message synchronously.
+	// If msg.Topic is empty, the producer default topic is used.
+	// On success, Partition, Offset, and Timestamp are written back to msg.
 	Produce(ctx context.Context, msg *ProducerMessage) error
-	// BatchProduce sends multiple messages synchronously. Returns error on first failure.
+	// BatchProduce sends multiple messages synchronously through the underlying
+	// batch producer. If a message topic is empty, the producer default topic is used.
 	BatchProduce(ctx context.Context, msgs []*ProducerMessage) error
-	AsyncProduce(ctx context.Context, msg *ProducerMessage, callback AsyncProduceCallback)
-	// Check checks whether there are active brokers and whether configured topics exist
-	Check(ctx context.Context) error
+	// AsyncProduce enqueues one message for asynchronous delivery.
+	// The callback receives the final broker delivery result.
+	AsyncProduce(ctx context.Context, msg *ProducerMessage, callback AsyncProduceCallback) error
 	// Close gracefully shuts down the producer and releases all resources.
 	Close(ctx context.Context) error
 }
 
-type ManualConsumer interface {
+// Consumer is a manual consumer. Call Consume in an application-owned loop and
+// call Ack only after the message has been processed successfully.
+type Consumer interface {
 	// Consume tries to fetch a message before ctx is done.
-	// Normally users need to put it in a loop, for example:
-	//
-	// // continuously fetch messages until ctx is done
-	// for {
-	// 	case <-ctx.Done();
-	// 		return
-	// 	default:
-	// 		msg, err := c.Consume(ctx)
-	// 		if err!=nil {
-	// 			ulog.Error("xxxxxx")
-	// 			continue
-	// 		}
-	//
-	// 		// message processing logic
-	// 		xxx
-	//
-	// 		err = c.Confirm(msg)
-	// 		if err!=nil {
-	// 			ulog.Error("xxxxxx")
-	// 		}
-	// }
-	//
-	// Possible errors: ErrConsumerClosed, ErrConsumerUpdating, ErrConsumeContextDone.
+	// Possible errors: ErrConsumerClosed, ErrConsumeContextDone.
 	Consume(ctx context.Context) (*ConsumerMessage, error)
-
-	// Confirm a message after processing.
-	Confirm(msg *ConsumerMessage) error
-
-	// ColdRetry reproduces the given message to the delayed topic(s) on Kafka clusters.
-	// And messages will be re-consumed by one of instances of this consumer group after "AT LEAST seconds".
-	ColdRetry(ctx context.Context, msg *ConsumerMessage, seconds int64) error
-
-	// DLQ sends a message to DLQ.
-	DLQ(ctx context.Context, msg *ConsumerMessage) error
-
-	// Check checks whether there are active brokers and whether configured topics exist
-	Check(ctx context.Context) error
+	// Ack confirms a message after successful processing and commits its offset.
+	Ack(ctx context.Context, msg *ConsumerMessage) error
 	// Close gracefully shuts down the consumer and releases all resources.
 	Close(ctx context.Context) error
 }
 
+// AdvancedConsumer owns the consume loop and delegates message handling to a
+// MessageProcessor or BatchMessageProcessor.
 type AdvancedConsumer interface {
-	// Run is used to run this consumer.
-	// Note that this method will block until Close() are called.
-	Run() error
-	// Close is used to close this consumer.
-	// Note: Currently, the ctx parameter is not used internally.
+	// Run starts consuming and blocks until ctx is done, Close is called, the
+	// consumer group returns an unrecoverable error, or the failure strategy stops it.
+	Run(ctx context.Context) error
+	// Close stops the consumer and releases resources.
 	Close(ctx context.Context) error
-	// Check checks whether there are active brokers and whether configured topics exist
-	Check(ctx context.Context) error
 }
 
-// MessageProcessor is the interface for consuming a single message
-// Use with AdvancedConsumer
+// MessageProcessor handles one message for AdvancedConsumer.
+// Returning nil commits the message offset. Returning an error delegates the
+// message to the configured ConsumerFailureStrategy.
 type MessageProcessor interface {
 	Process(ctx context.Context, msg *ConsumerMessage) error
 }
 
-// BatchMessageProcessor is the interface for consuming a batch of messages
-// Use with AdvancedConsumer
+// BatchMessageProcessor handles a batch of messages for AdvancedConsumer.
+// Returning nil commits the whole batch. Returning an error delegates the batch
+// to the configured ConsumerFailureStrategy.
 type BatchMessageProcessor interface {
 	BatchProcess(ctx context.Context, msgs []*ConsumerMessage) error
 }
 
+// ProducerMessage is the public message shape used by Producer.
+// Metadata is reserved by the implementation and ignored by JSON/YAML encoding.
 type ProducerMessage struct {
 	Topic     string
 	Key       []byte
@@ -94,6 +75,8 @@ type ProducerMessage struct {
 	Metadata Metadata `json:"-" yaml:"-"`
 }
 
+// ConsumerMessage is the public message shape returned by Consumer and passed
+// to AdvancedConsumer processors.
 type ConsumerMessage struct {
 	Topic     string
 	Key       []byte
@@ -103,6 +86,7 @@ type ConsumerMessage struct {
 	Offset    int64
 	Timestamp time.Time
 
+	// Metadata is reserved for the MQ implementation. User code should not modify it.
 	Metadata Metadata `json:"-" yaml:"-"`
 }
 
@@ -111,9 +95,9 @@ type Header struct {
 	Value []byte
 }
 
-// Metadata is sent with every message to provide extra context of the specifics MQ implementation.
+// Metadata carries implementation-specific context.
+// Business code should treat it as read-only.
 type Metadata map[interface{}]interface{}
 
-type AsyncProduceCallback interface {
-	Handle(ctx context.Context, msg *ProducerMessage, err error)
-}
+// AsyncProduceCallback receives the broker result for AsyncProduce.
+type AsyncProduceCallback func(ctx context.Context, msg *ProducerMessage, err error)

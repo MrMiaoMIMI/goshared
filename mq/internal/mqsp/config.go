@@ -1,102 +1,93 @@
 package mqsp
 
-import "github.com/MrMiaoMIMI/goshared/mq/mqspi"
+import (
+	"fmt"
+	"strings"
 
-var (
-	_ mqspi.ProducerConfig         = (*ProducerConfig)(nil)
-	_ mqspi.ConsumerConfig         = (*ConsumerConfig)(nil)
-	_ mqspi.AdvancedConsumerConfig = (*AdvancedConsumerConfig)(nil)
-	_ mqspi.Credentials            = (*Credentials)(nil)
+	"github.com/MrMiaoMIMI/goshared/mq/mqspi"
 )
 
-// ==================== Credentials ====================
+const defaultConsumerBuffer = 256
 
-type Credentials struct {
-	username  string
-	password  string
-	mechanism string
-}
-
-func NewCredentials(username, password, mechanism string) mqspi.Credentials {
-	return &Credentials{username: username, password: password, mechanism: mechanism}
-}
-
-func (c *Credentials) Username() string  { return c.username }
-func (c *Credentials) Password() string  { return c.password }
-func (c *Credentials) Mechanism() string { return c.mechanism }
-
-// ==================== ProducerConfig ====================
-
-type ProducerConfig struct {
-	brokers     []string
-	topic       string
-	credentials mqspi.Credentials
-}
-
-func NewProducerConfig(brokers []string, topic string, credentials mqspi.Credentials) mqspi.ProducerConfig {
-	return &ProducerConfig{brokers: brokers, topic: topic, credentials: credentials}
-}
-
-func (c *ProducerConfig) Brokers() []string          { return c.brokers }
-func (c *ProducerConfig) Topic() string               { return c.topic }
-func (c *ProducerConfig) Credentials() mqspi.Credentials { return c.credentials }
-
-// ==================== ConsumerConfig ====================
-
-type ConsumerConfig struct {
-	brokers     []string
-	topic       string
-	topics      []string
-	groupID     string
-	credentials mqspi.Credentials
-}
-
-func NewConsumerConfig(brokers []string, topic string, groupID string, credentials mqspi.Credentials) mqspi.ConsumerConfig {
-	return &ConsumerConfig{brokers: brokers, topic: topic, groupID: groupID, credentials: credentials}
-}
-
-func NewConsumerConfigWithTopics(brokers []string, topic string, topics []string, groupID string, credentials mqspi.Credentials) mqspi.ConsumerConfig {
-	return &ConsumerConfig{brokers: brokers, topic: topic, topics: topics, groupID: groupID, credentials: credentials}
-}
-
-func (c *ConsumerConfig) Brokers() []string              { return c.brokers }
-func (c *ConsumerConfig) Topic() string                   { return c.topic }
-func (c *ConsumerConfig) GroupID() string                  { return c.groupID }
-func (c *ConsumerConfig) Credentials() mqspi.Credentials { return c.credentials }
-
-func (c *ConsumerConfig) Topics() []string {
-	if len(c.topics) > 0 {
-		return c.topics
+func validateProducerConfig(config *mqspi.ProducerConfig) error {
+	if config == nil {
+		return fmt.Errorf("%w: producer config is nil", mqspi.ErrInvalidConfig)
 	}
-	if c.topic != "" {
-		return []string{c.topic}
+	if len(cleanStrings(config.Brokers)) == 0 {
+		return fmt.Errorf("%w: producer brokers is empty", mqspi.ErrInvalidConfig)
+	}
+	if err := validateCredentials(config.Credentials); err != nil {
+		return err
 	}
 	return nil
 }
 
-// ==================== AdvancedConsumerConfig ====================
-
-type AdvancedConsumerConfig struct {
-	ConsumerConfig
-	maxRetries int
-	dlqTopic   string
+func validateConsumerConfig(config *mqspi.ConsumerConfig) error {
+	if config == nil {
+		return fmt.Errorf("%w: consumer config is nil", mqspi.ErrInvalidConfig)
+	}
+	if len(cleanStrings(config.Brokers)) == 0 {
+		return fmt.Errorf("%w: consumer brokers is empty", mqspi.ErrInvalidConfig)
+	}
+	if strings.TrimSpace(config.GroupID) == "" {
+		return fmt.Errorf("%w: consumer group id is empty", mqspi.ErrInvalidConfig)
+	}
+	if len(consumerTopics(config)) == 0 {
+		return fmt.Errorf("%w: consumer topic is empty", mqspi.ErrInvalidConfig)
+	}
+	if err := validateCredentials(config.Credentials); err != nil {
+		return err
+	}
+	if err := validateFailurePolicy(config.FailurePolicy); err != nil {
+		return err
+	}
+	return nil
 }
 
-func NewAdvancedConsumerConfig(brokers []string, topic string, groupID string, maxRetries int, dlqTopic string, credentials mqspi.Credentials) mqspi.AdvancedConsumerConfig {
-	return &AdvancedConsumerConfig{
-		ConsumerConfig: ConsumerConfig{brokers: brokers, topic: topic, groupID: groupID, credentials: credentials},
-		maxRetries:     maxRetries,
-		dlqTopic:       dlqTopic,
+func validateFailurePolicy(policy *mqspi.ConsumerFailurePolicy) error {
+	if policy == nil {
+		return nil
+	}
+	switch policy.FinalAction {
+	case "", mqspi.ConsumerFailureActionRetry, mqspi.ConsumerFailureActionSkip, mqspi.ConsumerFailureActionStop:
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported consumer failure final action %q", mqspi.ErrInvalidConfig, policy.FinalAction)
 	}
 }
 
-func NewAdvancedConsumerConfigWithTopics(brokers []string, topic string, topics []string, groupID string, maxRetries int, dlqTopic string, credentials mqspi.Credentials) mqspi.AdvancedConsumerConfig {
-	return &AdvancedConsumerConfig{
-		ConsumerConfig: ConsumerConfig{brokers: brokers, topic: topic, topics: topics, groupID: groupID, credentials: credentials},
-		maxRetries:     maxRetries,
-		dlqTopic:       dlqTopic,
+func validateCredentials(credentials *mqspi.Credentials) error {
+	if credentials == nil || credentials.Mechanism == "" {
+		return nil
+	}
+	switch credentials.Mechanism {
+	case mqspi.SASLMechanismPlain, mqspi.SASLMechanismSCRAMSHA256, mqspi.SASLMechanismSCRAMSHA512:
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported sasl mechanism %q", mqspi.ErrInvalidConfig, credentials.Mechanism)
 	}
 }
 
-func (c *AdvancedConsumerConfig) MaxRetries() int  { return c.maxRetries }
-func (c *AdvancedConsumerConfig) DLQTopic() string { return c.dlqTopic }
+func consumerTopics(config *mqspi.ConsumerConfig) []string {
+	if config == nil {
+		return nil
+	}
+	if topics := cleanStrings(config.Topics); len(topics) > 0 {
+		return topics
+	}
+	if topic := strings.TrimSpace(config.Topic); topic != "" {
+		return []string{topic}
+	}
+	return nil
+}
+
+func cleanStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}

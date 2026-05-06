@@ -10,24 +10,24 @@ import (
 )
 
 // applySASL configures SASL authentication on a sarama config if credentials are provided.
-func applySASL(saramaConfig *sarama.Config, credentials mqspi.Credentials) {
-	if credentials == nil || credentials.Mechanism() == "" {
+func applySASL(saramaConfig *sarama.Config, credentials *mqspi.Credentials) {
+	if credentials == nil || credentials.Mechanism == "" {
 		return
 	}
 
 	saramaConfig.Net.SASL.Enable = true
-	saramaConfig.Net.SASL.User = credentials.Username()
-	saramaConfig.Net.SASL.Password = credentials.Password()
+	saramaConfig.Net.SASL.User = credentials.Username
+	saramaConfig.Net.SASL.Password = credentials.Password
 
-	switch credentials.Mechanism() {
-	case "PLAIN":
+	switch credentials.Mechanism {
+	case mqspi.SASLMechanismPlain:
 		saramaConfig.Net.SASL.Mechanism = sarama.SASLTypePlaintext
-	case "SCRAM-SHA-256":
+	case mqspi.SASLMechanismSCRAMSHA256:
 		saramaConfig.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
 		saramaConfig.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
 			return &scramClient{HashGeneratorFcn: scram.HashGeneratorFcn(sha256.New)}
 		}
-	case "SCRAM-SHA-512":
+	case mqspi.SASLMechanismSCRAMSHA512:
 		saramaConfig.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
 		saramaConfig.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
 			return &scramClient{HashGeneratorFcn: scram.HashGeneratorFcn(sha512.New)}

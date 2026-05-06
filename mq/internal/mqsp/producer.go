@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/IBM/sarama"
 	"github.com/MrMiaoMIMI/goshared/mq/mqspi"
@@ -19,41 +20,44 @@ type asyncMeta struct {
 }
 
 type SaramaProducer struct {
-	brokers       []string
 	defaultTopic  string
-	credentials   mqspi.Credentials
 	syncProducer  sarama.SyncProducer
 	asyncProducer sarama.AsyncProducer
 	mu            sync.RWMutex
 	wg            sync.WaitGroup
 	closed        atomic.Bool
+	done          chan struct{}
 }
 
-func NewProducer(config mqspi.ProducerConfig) (mqspi.Producer, error) {
+func NewProducer(config *mqspi.ProducerConfig) (mqspi.Producer, error) {
+	if err := validateProducerConfig(config); err != nil {
+		return nil, err
+	}
+
 	saramaConfig := sarama.NewConfig()
 	saramaConfig.Producer.Return.Successes = true
 	saramaConfig.Producer.Return.Errors = true
 	saramaConfig.Producer.RequiredAcks = sarama.WaitForAll
 	saramaConfig.Producer.Retry.Max = 3
-	applySASL(saramaConfig, config.Credentials())
+	applySASL(saramaConfig, config.Credentials)
 
-	syncProducer, err := sarama.NewSyncProducer(config.Brokers(), saramaConfig)
+	brokers := cleanStrings(config.Brokers)
+	syncProducer, err := sarama.NewSyncProducer(brokers, saramaConfig)
 	if err != nil {
 		return nil, fmt.Errorf("mq: failed to create sync producer: %w", err)
 	}
 
-	asyncProducer, err := sarama.NewAsyncProducer(config.Brokers(), saramaConfig)
+	asyncProducer, err := sarama.NewAsyncProducer(brokers, saramaConfig)
 	if err != nil {
 		syncProducer.Close()
 		return nil, fmt.Errorf("mq: failed to create async producer: %w", err)
 	}
 
 	p := &SaramaProducer{
-		brokers:       config.Brokers(),
-		defaultTopic:  config.Topic(),
-		credentials:   config.Credentials(),
+		defaultTopic:  config.Topic,
 		syncProducer:  syncProducer,
 		asyncProducer: asyncProducer,
+		done:          make(chan struct{}),
 	}
 
 	p.wg.Add(2)
@@ -63,81 +67,130 @@ func NewProducer(config mqspi.ProducerConfig) (mqspi.Producer, error) {
 	return p, nil
 }
 
-func (p *SaramaProducer) resolveTopic(msgTopic string) string {
+func (p *SaramaProducer) resolveTopic(msgTopic string) (string, error) {
 	if msgTopic != "" {
-		return msgTopic
+		return msgTopic, nil
 	}
-	return p.defaultTopic
+	if p.defaultTopic != "" {
+		return p.defaultTopic, nil
+	}
+	return "", fmt.Errorf("%w: producer topic is empty", mqspi.ErrInvalidConfig)
 }
 
-func (p *SaramaProducer) Produce(_ context.Context, msg *mqspi.ProducerMessage) error {
+func (p *SaramaProducer) Produce(ctx context.Context, msg *mqspi.ProducerMessage) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if p.closed.Load() {
 		return mqspi.ErrProducerClosed
 	}
+	if msg == nil {
+		return fmt.Errorf("%w: producer message is nil", mqspi.ErrInvalidConfig)
+	}
 
-	msg.Topic = p.resolveTopic(msg.Topic)
-	saramaMsg := toSaramaProducerMessage(msg)
+	topic, err := p.resolveTopic(msg.Topic)
+	if err != nil {
+		return err
+	}
+	msg.Topic = topic
+	saramaMsg := toSaramaProducerMessage(msg, nil)
 	partition, offset, err := p.syncProducer.SendMessage(saramaMsg)
 	if err != nil {
 		return err
 	}
 	msg.Partition = partition
 	msg.Offset = offset
+	msg.Timestamp = resolvedTimestamp(msg.Timestamp, saramaMsg.Timestamp)
 	return nil
 }
 
 func (p *SaramaProducer) BatchProduce(ctx context.Context, msgs []*mqspi.ProducerMessage) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if p.closed.Load() {
 		return mqspi.ErrProducerClosed
 	}
+
+	saramaMsgs := make([]*sarama.ProducerMessage, 0, len(msgs))
 	for _, msg := range msgs {
-		if err := p.Produce(ctx, msg); err != nil {
+		if msg == nil {
+			return fmt.Errorf("%w: producer message is nil", mqspi.ErrInvalidConfig)
+		}
+		topic, err := p.resolveTopic(msg.Topic)
+		if err != nil {
 			return err
+		}
+		msg.Topic = topic
+		saramaMsgs = append(saramaMsgs, toSaramaProducerMessage(msg, msg))
+	}
+	if len(saramaMsgs) == 0 {
+		return nil
+	}
+
+	if err := p.syncProducer.SendMessages(saramaMsgs); err != nil {
+		return err
+	}
+	for _, saramaMsg := range saramaMsgs {
+		if originalMsg, ok := saramaMsg.Metadata.(*mqspi.ProducerMessage); ok {
+			originalMsg.Partition = saramaMsg.Partition
+			originalMsg.Offset = saramaMsg.Offset
+			originalMsg.Timestamp = resolvedTimestamp(originalMsg.Timestamp, saramaMsg.Timestamp)
 		}
 	}
 	return nil
 }
 
-func (p *SaramaProducer) AsyncProduce(ctx context.Context, msg *mqspi.ProducerMessage, callback mqspi.AsyncProduceCallback) {
+func (p *SaramaProducer) AsyncProduce(ctx context.Context, msg *mqspi.ProducerMessage, callback mqspi.AsyncProduceCallback) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if msg == nil {
+		return fmt.Errorf("%w: producer message is nil", mqspi.ErrInvalidConfig)
+	}
+
+	topic, err := p.resolveTopic(msg.Topic)
+	if err != nil {
+		return err
+	}
+	msg.Topic = topic
+	saramaMsg := toSaramaProducerMessage(msg, &asyncMeta{
+		originalMsg: msg,
+		callback:    callback,
+		ctx:         ctx,
+	})
+
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
 	if p.closed.Load() {
-		if callback != nil {
-			callback.Handle(ctx, msg, mqspi.ErrProducerClosed)
-		}
-		return
+		return mqspi.ErrProducerClosed
 	}
 
-	msg.Topic = p.resolveTopic(msg.Topic)
-	saramaMsg := toSaramaProducerMessage(msg)
-	saramaMsg.Metadata = &asyncMeta{
-		originalMsg: msg,
-		callback:    callback,
-		ctx:         ctx,
+	select {
+	case p.asyncProducer.Input() <- saramaMsg:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.done:
+		return mqspi.ErrProducerClosed
 	}
-	p.asyncProducer.Input() <- saramaMsg
-}
-
-func (p *SaramaProducer) Check(_ context.Context) error {
-	cfg := sarama.NewConfig()
-	applySASL(cfg, p.credentials)
-	client, err := sarama.NewClient(p.brokers, cfg)
-	if err != nil {
-		return fmt.Errorf("mq: broker connectivity check failed: %w", err)
-	}
-	defer client.Close()
-
-	if len(client.Brokers()) == 0 {
-		return fmt.Errorf("mq: no active brokers found")
-	}
-	return nil
 }
 
 func (p *SaramaProducer) Close(_ context.Context) error {
 	if !p.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	close(p.done)
 	// Wait for in-flight AsyncProduce calls to finish sending to Input()
 	p.mu.Lock()
 	p.mu.Unlock()
@@ -162,7 +215,8 @@ func (p *SaramaProducer) handleAsyncSuccesses() {
 		if meta, ok := msg.Metadata.(*asyncMeta); ok && meta.callback != nil {
 			meta.originalMsg.Partition = msg.Partition
 			meta.originalMsg.Offset = msg.Offset
-			meta.callback.Handle(meta.ctx, meta.originalMsg, nil)
+			meta.originalMsg.Timestamp = resolvedTimestamp(meta.originalMsg.Timestamp, msg.Timestamp)
+			meta.callback(meta.ctx, meta.originalMsg, nil)
 		}
 	}
 }
@@ -171,14 +225,15 @@ func (p *SaramaProducer) handleAsyncErrors() {
 	defer p.wg.Done()
 	for pErr := range p.asyncProducer.Errors() {
 		if meta, ok := pErr.Msg.Metadata.(*asyncMeta); ok && meta.callback != nil {
-			meta.callback.Handle(meta.ctx, meta.originalMsg, pErr.Err)
+			meta.callback(meta.ctx, meta.originalMsg, pErr.Err)
 		}
 	}
 }
 
-func toSaramaProducerMessage(msg *mqspi.ProducerMessage) *sarama.ProducerMessage {
+func toSaramaProducerMessage(msg *mqspi.ProducerMessage, metadata any) *sarama.ProducerMessage {
 	saramaMsg := &sarama.ProducerMessage{
-		Topic: msg.Topic,
+		Topic:    msg.Topic,
+		Metadata: metadata,
 	}
 	if msg.Key != nil {
 		saramaMsg.Key = sarama.ByteEncoder(msg.Key)
@@ -197,4 +252,11 @@ func toSaramaProducerMessage(msg *mqspi.ProducerMessage) *sarama.ProducerMessage
 		saramaMsg.Timestamp = msg.Timestamp
 	}
 	return saramaMsg
+}
+
+func resolvedTimestamp(original, delivered time.Time) time.Time {
+	if !delivered.IsZero() {
+		return delivered
+	}
+	return original
 }

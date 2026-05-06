@@ -2,9 +2,11 @@ package mqsp
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strconv"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/IBM/sarama"
 	"github.com/MrMiaoMIMI/goshared/mq/mqspi"
@@ -12,72 +14,62 @@ import (
 
 var _ mqspi.AdvancedConsumer = (*SaramaAdvancedConsumer)(nil)
 
-const retryCountHeader = "x-retry-count"
+const defaultBatchSize = 100
 
 type SaramaAdvancedConsumer struct {
 	consumerGroup  sarama.ConsumerGroup
 	topics         []string
-	brokers        []string
-	credentials    mqspi.Credentials
 	processor      mqspi.MessageProcessor
 	batchProcessor mqspi.BatchMessageProcessor
-	maxRetries     int
-	dlqTopic       string
-	syncProducer   sarama.SyncProducer
+	strategy       mqspi.ConsumerFailureStrategy
+	failures       *failureTracker
 
-	ctx      context.Context
-	cancel   context.CancelFunc
-	closed   atomic.Bool
-	errDone  chan struct{}
+	ctx     context.Context
+	cancel  context.CancelFunc
+	closed  atomic.Bool
+	errDone chan struct{}
 }
 
-func NewAdvancedConsumer(config mqspi.AdvancedConsumerConfig, processor mqspi.MessageProcessor) (mqspi.AdvancedConsumer, error) {
+func NewAdvancedConsumer(config *mqspi.ConsumerConfig, processor mqspi.MessageProcessor) (mqspi.AdvancedConsumer, error) {
 	return newAdvancedConsumer(config, processor, nil)
 }
 
-func NewAdvancedBatchConsumer(config mqspi.AdvancedConsumerConfig, batchProcessor mqspi.BatchMessageProcessor) (mqspi.AdvancedConsumer, error) {
+func NewAdvancedBatchConsumer(config *mqspi.ConsumerConfig, batchProcessor mqspi.BatchMessageProcessor) (mqspi.AdvancedConsumer, error) {
 	return newAdvancedConsumer(config, nil, batchProcessor)
 }
 
-func newAdvancedConsumer(config mqspi.AdvancedConsumerConfig, processor mqspi.MessageProcessor, batchProcessor mqspi.BatchMessageProcessor) (mqspi.AdvancedConsumer, error) {
+func newAdvancedConsumer(config *mqspi.ConsumerConfig, processor mqspi.MessageProcessor, batchProcessor mqspi.BatchMessageProcessor) (mqspi.AdvancedConsumer, error) {
+	if err := validateConsumerConfig(config); err != nil {
+		return nil, err
+	}
+	if processor == nil && batchProcessor == nil {
+		return nil, fmt.Errorf("%w: processor is nil", mqspi.ErrInvalidConfig)
+	}
+
 	saramaConfig := sarama.NewConfig()
-	saramaConfig.Consumer.Offsets.AutoCommit.Enable = true
+	saramaConfig.Consumer.Offsets.AutoCommit.Enable = false
 	saramaConfig.Consumer.Return.Errors = true
 	saramaConfig.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{
 		sarama.NewBalanceStrategyRoundRobin(),
 	}
-	applySASL(saramaConfig, config.Credentials())
+	applySASL(saramaConfig, config.Credentials)
 
-	consumerGroup, err := sarama.NewConsumerGroup(config.Brokers(), config.GroupID(), saramaConfig)
+	brokers := cleanStrings(config.Brokers)
+	topics := consumerTopics(config)
+	consumerGroup, err := sarama.NewConsumerGroup(brokers, config.GroupID, saramaConfig)
 	if err != nil {
 		return nil, fmt.Errorf("mq: failed to create consumer group: %w", err)
-	}
-
-	var syncProducer sarama.SyncProducer
-	if config.DLQTopic() != "" || config.MaxRetries() > 0 {
-		producerConfig := sarama.NewConfig()
-		producerConfig.Producer.Return.Successes = true
-		producerConfig.Producer.RequiredAcks = sarama.WaitForAll
-		applySASL(producerConfig, config.Credentials())
-		syncProducer, err = sarama.NewSyncProducer(config.Brokers(), producerConfig)
-		if err != nil {
-			consumerGroup.Close()
-			return nil, fmt.Errorf("mq: failed to create internal producer for retry/dlq: %w", err)
-		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	ac := &SaramaAdvancedConsumer{
 		consumerGroup:  consumerGroup,
-		topics:         config.Topics(),
-		brokers:        config.Brokers(),
-		credentials:    config.Credentials(),
+		topics:         topics,
 		processor:      processor,
 		batchProcessor: batchProcessor,
-		maxRetries:     config.MaxRetries(),
-		dlqTopic:       config.DLQTopic(),
-		syncProducer:   syncProducer,
+		strategy:       consumerFailureStrategy(config),
+		failures:       newFailureTracker(),
 		ctx:            ctx,
 		cancel:         cancel,
 		errDone:        make(chan struct{}),
@@ -94,22 +86,34 @@ func (c *SaramaAdvancedConsumer) drainErrors() {
 	}
 }
 
-func (c *SaramaAdvancedConsumer) Run() error {
+func (c *SaramaAdvancedConsumer) Run(ctx context.Context) error {
+	runCtx, stop := mergeContexts(ctx, c.ctx)
+	defer stop()
+
 	handler := &advancedConsumerHandler{
 		processor:      c.processor,
 		batchProcessor: c.batchProcessor,
-		maxRetries:     c.maxRetries,
-		dlqTopic:       c.dlqTopic,
-		syncProducer:   c.syncProducer,
+		strategy:       c.strategy,
+		failures:       c.failures,
 	}
 
 	for {
-		if c.ctx.Err() != nil {
+		if runCtx.Err() != nil {
 			return nil
 		}
-		if err := c.consumerGroup.Consume(c.ctx, c.topics, handler); err != nil {
-			if c.ctx.Err() != nil {
+		if err := c.consumerGroup.Consume(runCtx, c.topics, handler); err != nil {
+			if runCtx.Err() != nil {
 				return nil
+			}
+			var failureErr *processFailureError
+			if errors.As(err, &failureErr) {
+				if failureErr.decision.Action == mqspi.ConsumerFailureActionRetry {
+					if waitErr := waitFailureBackoff(runCtx, failureErr.decision.Backoff); waitErr != nil {
+						return nil
+					}
+					continue
+				}
+				return fmt.Errorf("mq: consumer stopped by failure strategy: %w", failureErr)
 			}
 			return fmt.Errorf("mq: consumer group error: %w", err)
 		}
@@ -127,37 +131,8 @@ func (c *SaramaAdvancedConsumer) Close(_ context.Context) error {
 		errs = append(errs, err)
 	}
 	<-c.errDone
-	if c.syncProducer != nil {
-		if err := c.syncProducer.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	if len(errs) > 0 {
 		return fmt.Errorf("mq: errors closing advanced consumer: %v", errs)
-	}
-	return nil
-}
-
-func (c *SaramaAdvancedConsumer) Check(_ context.Context) error {
-	cfg := sarama.NewConfig()
-	applySASL(cfg, c.credentials)
-	client, err := sarama.NewClient(c.brokers, cfg)
-	if err != nil {
-		return fmt.Errorf("mq: broker connectivity check failed: %w", err)
-	}
-	defer client.Close()
-
-	if len(client.Brokers()) == 0 {
-		return fmt.Errorf("mq: no active brokers found")
-	}
-	for _, topic := range c.topics {
-		partitions, err := client.Partitions(topic)
-		if err != nil {
-			return fmt.Errorf("mq: topic %q check failed: %w", topic, err)
-		}
-		if len(partitions) == 0 {
-			return fmt.Errorf("mq: topic %q has no partitions", topic)
-		}
 	}
 	return nil
 }
@@ -166,9 +141,8 @@ func (c *SaramaAdvancedConsumer) Check(_ context.Context) error {
 type advancedConsumerHandler struct {
 	processor      mqspi.MessageProcessor
 	batchProcessor mqspi.BatchMessageProcessor
-	maxRetries     int
-	dlqTopic       string
-	syncProducer   sarama.SyncProducer
+	strategy       mqspi.ConsumerFailureStrategy
+	failures       *failureTracker
 }
 
 func (h *advancedConsumerHandler) Setup(_ sarama.ConsumerGroupSession) error   { return nil }
@@ -192,22 +166,16 @@ func (h *advancedConsumerHandler) consumeClaimSingle(session sarama.ConsumerGrou
 				return nil
 			}
 			msg := fromSaramaConsumerMessage(raw)
-			retryCount := getRetryCount(raw)
 
-			err := h.processor.Process(session.Context(), msg)
-			if err == nil {
-				session.MarkMessage(raw, "")
+			if err := h.processor.Process(session.Context(), msg); err != nil {
+				if failureErr := h.handleFailure(session, []*sarama.ConsumerMessage{raw}, []*mqspi.ConsumerMessage{msg}, err); failureErr != nil {
+					return failureErr
+				}
 				continue
 			}
-
-			if retryCount < h.maxRetries {
-				if retryErr := h.sendRetry(raw, retryCount+1); retryErr != nil {
-					h.sendDLQ(raw)
-				}
-			} else if h.dlqTopic != "" {
-				h.sendDLQ(raw)
-			}
 			session.MarkMessage(raw, "")
+			session.Commit()
+			h.failures.reset([]*sarama.ConsumerMessage{raw})
 
 		case <-session.Context().Done():
 			return nil
@@ -216,10 +184,8 @@ func (h *advancedConsumerHandler) consumeClaimSingle(session sarama.ConsumerGrou
 }
 
 func (h *advancedConsumerHandler) consumeClaimBatch(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	const batchSize = 100
-
 	for {
-		batch := make([]*sarama.ConsumerMessage, 0, batchSize)
+		batch := make([]*sarama.ConsumerMessage, 0, defaultBatchSize)
 
 		// Block until we get at least one message
 		select {
@@ -234,7 +200,7 @@ func (h *advancedConsumerHandler) consumeClaimBatch(session sarama.ConsumerGroup
 
 		// Drain more messages non-blocking, up to batchSize
 	drain:
-		for len(batch) < batchSize {
+		for len(batch) < defaultBatchSize {
 			select {
 			case raw, ok := <-claim.Messages():
 				if !ok {
@@ -250,73 +216,171 @@ func (h *advancedConsumerHandler) consumeClaimBatch(session sarama.ConsumerGroup
 			msgs[i] = fromSaramaConsumerMessage(raw)
 		}
 
-		err := h.batchProcessor.BatchProcess(session.Context(), msgs)
-		if err != nil {
-			for _, raw := range batch {
-				retryCount := getRetryCount(raw)
-				if retryCount < h.maxRetries {
-					if retryErr := h.sendRetry(raw, retryCount+1); retryErr != nil {
-						h.sendDLQ(raw)
-					}
-				} else if h.dlqTopic != "" {
-					h.sendDLQ(raw)
-				}
+		if err := h.batchProcessor.BatchProcess(session.Context(), msgs); err != nil {
+			if failureErr := h.handleFailure(session, batch, msgs, err); failureErr != nil {
+				return failureErr
 			}
+			continue
 		}
 
 		for _, raw := range batch {
 			session.MarkMessage(raw, "")
 		}
+		session.Commit()
+		h.failures.reset(batch)
 	}
 }
 
-func (h *advancedConsumerHandler) sendRetry(raw *sarama.ConsumerMessage, retryCount int) error {
-	if h.syncProducer == nil {
-		return fmt.Errorf("mq: no producer configured for retry")
+func (h *advancedConsumerHandler) handleFailure(session sarama.ConsumerGroupSession, raws []*sarama.ConsumerMessage, msgs []*mqspi.ConsumerMessage, err error) error {
+	attempt := h.failures.increment(raws)
+	failure := &mqspi.ConsumerFailure{
+		Err:      err,
+		Attempt:  attempt,
+		Messages: msgs,
 	}
-	retryMsg := &sarama.ProducerMessage{
-		Topic: raw.Topic,
-		Key:   sarama.ByteEncoder(raw.Key),
-		Value: sarama.ByteEncoder(raw.Value),
-		Headers: []sarama.RecordHeader{
-			{Key: []byte(retryCountHeader), Value: []byte(strconv.Itoa(retryCount))},
-		},
+	if len(msgs) > 0 {
+		failure.Message = msgs[0]
 	}
-	for _, header := range raw.Headers {
-		if header != nil && string(header.Key) != retryCountHeader {
-			retryMsg.Headers = append(retryMsg.Headers, sarama.RecordHeader{Key: header.Key, Value: header.Value})
+
+	strategy := h.strategy
+	if strategy == nil {
+		strategy = mqspi.DefaultConsumerFailurePolicy()
+	}
+	decision := normalizeFailureDecision(strategy.Decide(session.Context(), failure))
+	switch decision.Action {
+	case mqspi.ConsumerFailureActionSkip:
+		for _, raw := range raws {
+			session.MarkMessage(raw, "")
 		}
+		session.Commit()
+		h.failures.reset(raws)
+		return nil
+	case mqspi.ConsumerFailureActionStop:
+		h.failures.reset(raws)
+		return &processFailureError{failure: failure, decision: decision}
+	case mqspi.ConsumerFailureActionRetry:
+		return &processFailureError{failure: failure, decision: decision}
+	default:
+		decision.Action = mqspi.ConsumerFailureActionRetry
+		return &processFailureError{failure: failure, decision: decision}
 	}
-	_, _, err := h.syncProducer.SendMessage(retryMsg)
-	return err
 }
 
-func (h *advancedConsumerHandler) sendDLQ(raw *sarama.ConsumerMessage) {
-	if h.syncProducer == nil || h.dlqTopic == "" {
+func mergeContexts(ctx context.Context, internal context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel()
+		case <-internal.Done():
+			cancel()
+		case <-runCtx.Done():
+		}
+	}()
+	return runCtx, cancel
+}
+
+func consumerFailureStrategy(config *mqspi.ConsumerConfig) mqspi.ConsumerFailureStrategy {
+	if config != nil && config.FailureStrategy != nil {
+		return config.FailureStrategy
+	}
+	if config != nil && config.FailurePolicy != nil {
+		return config.FailurePolicy
+	}
+	return mqspi.DefaultConsumerFailurePolicy()
+}
+
+type processFailureError struct {
+	failure  *mqspi.ConsumerFailure
+	decision mqspi.ConsumerFailureDecision
+}
+
+func (e *processFailureError) Error() string {
+	if e == nil || e.failure == nil || e.failure.Err == nil {
+		return "mq: consumer processor failed"
+	}
+	return fmt.Sprintf("mq: consumer processor failed after attempt %d: %v", e.failure.Attempt, e.failure.Err)
+}
+
+func (e *processFailureError) Unwrap() error {
+	if e == nil || e.failure == nil {
+		return nil
+	}
+	return e.failure.Err
+}
+
+func normalizeFailureDecision(decision mqspi.ConsumerFailureDecision) mqspi.ConsumerFailureDecision {
+	switch decision.Action {
+	case mqspi.ConsumerFailureActionRetry, mqspi.ConsumerFailureActionSkip, mqspi.ConsumerFailureActionStop:
+	case "":
+		decision.Action = mqspi.ConsumerFailureActionRetry
+	default:
+		decision.Action = mqspi.ConsumerFailureActionRetry
+	}
+	if decision.Backoff < 0 {
+		decision.Backoff = 0
+	}
+	return decision
+}
+
+func waitFailureBackoff(ctx context.Context, backoff time.Duration) error {
+	if backoff <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+type failureTracker struct {
+	mu       sync.Mutex
+	attempts map[string]int
+}
+
+func newFailureTracker() *failureTracker {
+	return &failureTracker{attempts: make(map[string]int)}
+}
+
+func (t *failureTracker) increment(raws []*sarama.ConsumerMessage) int {
+	key := failureKey(raws)
+	if key == "" {
+		return 1
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.attempts[key]++
+	return t.attempts[key]
+}
+
+func (t *failureTracker) reset(raws []*sarama.ConsumerMessage) {
+	key := failureKey(raws)
+	if key == "" {
 		return
 	}
-	dlqMsg := &sarama.ProducerMessage{
-		Topic: h.dlqTopic,
-		Key:   sarama.ByteEncoder(raw.Key),
-		Value: sarama.ByteEncoder(raw.Value),
-		Headers: []sarama.RecordHeader{
-			{Key: []byte(originalTopicHeader), Value: []byte(raw.Topic)},
-		},
-	}
-	for _, header := range raw.Headers {
-		if header != nil {
-			dlqMsg.Headers = append(dlqMsg.Headers, sarama.RecordHeader{Key: header.Key, Value: header.Value})
-		}
-	}
-	h.syncProducer.SendMessage(dlqMsg)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	delete(t.attempts, key)
 }
 
-func getRetryCount(msg *sarama.ConsumerMessage) int {
-	for _, h := range msg.Headers {
-		if h != nil && string(h.Key) == retryCountHeader {
-			count, _ := strconv.Atoi(string(h.Value))
-			return count
-		}
+func failureKey(raws []*sarama.ConsumerMessage) string {
+	if len(raws) == 0 || raws[0] == nil {
+		return ""
 	}
-	return 0
+	first := raws[0]
+	if len(raws) == 1 {
+		return fmt.Sprintf("%s:%d:%d", first.Topic, first.Partition, first.Offset)
+	}
+	last := raws[len(raws)-1]
+	return fmt.Sprintf("%s:%d:%d-%d", first.Topic, first.Partition, first.Offset, last.Offset)
 }
