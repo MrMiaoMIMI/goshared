@@ -2,8 +2,9 @@ package cachesp
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"reflect"
+	"sync"
 	"time"
 
 	"github.com/MrMiaoMIMI/goshared/cache/cachespi"
@@ -12,14 +13,15 @@ import (
 
 var _ cachespi.Cache = (*RistrettoCache)(nil)
 
-// CacheOption configures the RistrettoCache.
-type CacheOption func(*cacheConfig)
+// RistrettoOption configures the RistrettoCache.
+type RistrettoOption func(*cacheConfig)
 
 type cacheConfig struct {
 	numCounters int64
 	maxCost     int64
 	bufferItems int64
 	defaultTTL  time.Duration
+	codec       cachespi.Codec
 }
 
 func defaultConfig() *cacheConfig {
@@ -31,32 +33,44 @@ func defaultConfig() *cacheConfig {
 	}
 }
 
-func WithDefaultTTL(d time.Duration) CacheOption {
+func WithRistrettoDefaultTTL(d time.Duration) RistrettoOption {
 	return func(c *cacheConfig) { c.defaultTTL = d }
 }
 
-func WithNumCounters(n int64) CacheOption {
+func WithRistrettoNumCounters(n int64) RistrettoOption {
 	return func(c *cacheConfig) { c.numCounters = n }
 }
 
-func WithMaxCost(n int64) CacheOption {
+func WithRistrettoMaxCost(n int64) RistrettoOption {
 	return func(c *cacheConfig) { c.maxCost = n }
 }
 
-func WithBufferItems(n int64) CacheOption {
+func WithRistrettoBufferItems(n int64) RistrettoOption {
 	return func(c *cacheConfig) { c.bufferItems = n }
+}
+
+func WithRistrettoCodec(codec cachespi.Codec) RistrettoOption {
+	return func(c *cacheConfig) { c.codec = codec }
 }
 
 // RistrettoCache implements cachespi.Cache using dgraph-io/ristretto as the backend.
 type RistrettoCache struct {
 	cache      *ristretto.Cache[string, any]
 	defaultTTL time.Duration
+	codec      valueCodec
+	mu         sync.Mutex
+	closed     bool
 }
 
-func NewRistrettoCache(opts ...CacheOption) cachespi.Cache {
+func NewRistrettoCache(opts ...RistrettoOption) (*RistrettoCache, error) {
 	cfg := defaultConfig()
 	for _, opt := range opts {
-		opt(cfg)
+		if opt != nil {
+			opt(cfg)
+		}
+	}
+	if _, err := resolveTTL(cachespi.DefaultExpiration, cfg.defaultTTL); err != nil {
+		return nil, err
 	}
 
 	cache, err := ristretto.NewCache(&ristretto.Config[string, any]{
@@ -65,104 +79,154 @@ func NewRistrettoCache(opts ...CacheOption) cachespi.Cache {
 		BufferItems: cfg.bufferItems,
 	})
 	if err != nil {
-		panic(fmt.Sprintf("cache: failed to create ristretto cache: %v", err))
+		return nil, fmt.Errorf("cache: failed to create ristretto cache: %w", err)
+	}
+
+	codec := valueCodec(referenceValueCodec{})
+	if cfg.codec != nil {
+		codec = newBinaryValueCodec(cfg.codec)
 	}
 
 	return &RistrettoCache{
 		cache:      cache,
 		defaultTTL: cfg.defaultTTL,
-	}
+		codec:      codec,
+	}, nil
 }
 
-// resolveTTL maps cachespi expiration semantics to ristretto TTL.
-//   - NoExpiration (-1)      → 0 (ristretto: never expire)
-//   - DefaultExpiration (0)  → configured defaultTTL
-//   - positive duration      → used as-is
-func (c *RistrettoCache) resolveTTL(expire time.Duration) time.Duration {
-	switch expire {
-	case cachespi.NoExpiration:
-		return 0
-	case cachespi.DefaultExpiration:
-		return c.defaultTTL
-	default:
-		return expire
+func (c *RistrettoCache) Close(_ context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
 	}
+	c.cache.Close()
+	c.closed = true
+	return nil
 }
 
-func (c *RistrettoCache) Get(_ context.Context, key string, receiver any, _ ...cachespi.OperationOption) error {
+func (c *RistrettoCache) Get(_ context.Context, key string, receiver any) error {
 	val, found := c.cache.Get(key)
 	if !found {
 		return cachespi.ErrCacheMiss
 	}
-	return setReceiver(receiver, val)
+	return c.codec.decode(val, receiver)
 }
 
-func (c *RistrettoCache) GetOrDefault(_ context.Context, key string, defaultVal any, receiver any, _ ...cachespi.OperationOption) error {
+func (c *RistrettoCache) GetOrDefault(_ context.Context, key string, defaultVal any, receiver any) error {
 	val, found := c.cache.Get(key)
 	if !found {
 		return setReceiver(receiver, defaultVal)
 	}
-	return setReceiver(receiver, val)
+	return c.codec.decode(val, receiver)
 }
 
-func (c *RistrettoCache) Exists(_ context.Context, key string, _ ...cachespi.OperationOption) (bool, error) {
+func (c *RistrettoCache) Exists(_ context.Context, key string) (bool, error) {
 	_, found := c.cache.Get(key)
 	return found, nil
 }
 
-func (c *RistrettoCache) GetMany(_ context.Context, receiverMap map[string]any, _ ...cachespi.OperationOption) error {
+func (c *RistrettoCache) GetMany(_ context.Context, receiverMap map[string]any) error {
+	var missingKeys []string
 	for key, receiver := range receiverMap {
 		val, found := c.cache.Get(key)
 		if !found {
-			delete(receiverMap, key)
+			missingKeys = append(missingKeys, key)
 			continue
 		}
-		if err := setReceiver(receiver, val); err != nil {
-			delete(receiverMap, key)
+		if err := c.codec.decode(val, receiver); err != nil {
+			return fmt.Errorf("cache: key %q: %w", key, err)
 		}
+	}
+	for _, key := range missingKeys {
+		delete(receiverMap, key)
 	}
 	return nil
 }
 
-func (c *RistrettoCache) Set(_ context.Context, key string, value any, expire time.Duration, _ ...cachespi.OperationOption) error {
-	ttl := c.resolveTTL(expire)
-	c.cache.SetWithTTL(key, value, 1, ttl)
-	c.cache.Wait()
-	return nil
+func (c *RistrettoCache) Set(_ context.Context, key string, value any, expire time.Duration) error {
+	encoded, err := c.codec.encode(value)
+	if err != nil {
+		return fmt.Errorf("cache: failed to encode value for key %q: %w", key, err)
+	}
+	return c.setManyEncoded(map[string]any{key: encoded}, expire)
 }
 
-// SetNX is best-effort for in-memory cache (not truly atomic / TOCTOU).
-// Use Redis implementation for production SetNX semantics.
-func (c *RistrettoCache) SetNX(_ context.Context, key string, value any, expire time.Duration, _ ...cachespi.OperationOption) (bool, error) {
+func (c *RistrettoCache) SetNX(_ context.Context, key string, value any, expire time.Duration) (bool, error) {
+	ttl, err := resolveTTL(expire, c.defaultTTL)
+	if err != nil {
+		return false, err
+	}
+	encoded, err := c.codec.encode(value)
+	if err != nil {
+		return false, fmt.Errorf("cache: failed to encode value for key %q: %w", key, err)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, found := c.cache.Get(key)
 	if found {
 		return false, nil
 	}
-	ttl := c.resolveTTL(expire)
-	c.cache.SetWithTTL(key, value, 1, ttl)
+	if ok := c.cache.SetWithTTL(key, encoded, 1, ttl); !ok {
+		return false, fmt.Errorf("%w: key %q", cachespi.ErrCacheSetDropped, key)
+	}
 	c.cache.Wait()
 	return true, nil
 }
 
-func (c *RistrettoCache) GetAndDelete(_ context.Context, key string, receiver any, _ ...cachespi.OperationOption) error {
+func (c *RistrettoCache) GetAndDelete(_ context.Context, key string, receiver any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	val, found := c.cache.Get(key)
 	if !found {
 		return cachespi.ErrCacheMiss
 	}
 	c.cache.Del(key)
-	return setReceiver(receiver, val)
+	return c.codec.decode(val, receiver)
 }
 
-func (c *RistrettoCache) SetMany(_ context.Context, valueMap map[string]any, expire time.Duration, _ ...cachespi.OperationOption) error {
-	ttl := c.resolveTTL(expire)
+func (c *RistrettoCache) SetMany(_ context.Context, valueMap map[string]any, expire time.Duration) error {
+	if len(valueMap) == 0 {
+		return nil
+	}
+
+	encodedMap := make(map[string]any, len(valueMap))
 	for key, value := range valueMap {
-		c.cache.SetWithTTL(key, value, 1, ttl)
+		encoded, err := c.codec.encode(value)
+		if err != nil {
+			return fmt.Errorf("cache: failed to encode value for key %q: %w", key, err)
+		}
+		encodedMap[key] = encoded
+	}
+	return c.setManyEncoded(encodedMap, expire)
+}
+
+func (c *RistrettoCache) setManyEncoded(valueMap map[string]any, expire time.Duration) error {
+	if len(valueMap) == 0 {
+		return nil
+	}
+
+	ttl, err := resolveTTL(expire, c.defaultTTL)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var firstErr error
+	for key, value := range valueMap {
+		if ok := c.cache.SetWithTTL(key, value, 1, ttl); !ok && firstErr == nil {
+			firstErr = fmt.Errorf("%w: key %q", cachespi.ErrCacheSetDropped, key)
+		}
 	}
 	c.cache.Wait()
-	return nil
+	return firstErr
 }
 
-func (c *RistrettoCache) Delete(_ context.Context, key string, _ ...cachespi.OperationOption) error {
+func (c *RistrettoCache) Delete(_ context.Context, key string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, found := c.cache.Get(key)
 	if !found {
 		return cachespi.ErrCacheMiss
@@ -172,7 +236,9 @@ func (c *RistrettoCache) Delete(_ context.Context, key string, _ ...cachespi.Ope
 	return nil
 }
 
-func (c *RistrettoCache) DeleteMany(_ context.Context, keys []string, _ ...cachespi.OperationOption) error {
+func (c *RistrettoCache) DeleteMany(_ context.Context, keys []string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, key := range keys {
 		c.cache.Del(key)
 	}
@@ -180,10 +246,18 @@ func (c *RistrettoCache) DeleteMany(_ context.Context, keys []string, _ ...cache
 }
 
 func (c *RistrettoCache) Load(ctx context.Context, loader cachespi.DataLoader, key string, receiver any,
-	expire time.Duration, _ ...cachespi.OperationOption) error {
+	expire time.Duration) error {
 
 	if err := c.Get(ctx, key, receiver); err == nil {
 		return nil
+	} else if !errors.Is(err, cachespi.ErrCacheMiss) {
+		return err
+	}
+	if _, err := resolveTTL(expire, c.defaultTTL); err != nil {
+		return err
+	}
+	if loader == nil {
+		return fmt.Errorf("cache: loader must not be nil")
 	}
 
 	results, err := loader(ctx, []string{key})
@@ -194,110 +268,77 @@ func (c *RistrettoCache) Load(ctx context.Context, loader cachespi.DataLoader, k
 		return cachespi.ErrCacheMiss
 	}
 
-	_ = c.Set(ctx, key, results[0], expire)
-	return setReceiver(receiver, results[0])
+	encoded, err := c.codec.encode(results[0])
+	if err != nil {
+		return fmt.Errorf("cache: failed to encode value for key %q: %w", key, err)
+	}
+	if err := c.codec.decode(encoded, receiver); err != nil {
+		return err
+	}
+	return c.setManyEncoded(map[string]any{key: encoded}, expire)
 }
 
 func (c *RistrettoCache) LoadMany(ctx context.Context, loader cachespi.DataLoader, receiverMap map[string]any,
-	expire time.Duration, _ ...cachespi.OperationOption) error {
+	expire time.Duration) error {
+
+	if len(receiverMap) == 0 {
+		return nil
+	}
 
 	var missingKeys []string
-	missingReceivers := make(map[string]any)
 
 	for key, receiver := range receiverMap {
 		val, found := c.cache.Get(key)
 		if found {
-			if err := setReceiver(receiver, val); err != nil {
-				delete(receiverMap, key)
+			if err := c.codec.decode(val, receiver); err != nil {
+				return fmt.Errorf("cache: key %q: %w", key, err)
 			}
 		} else {
 			missingKeys = append(missingKeys, key)
-			missingReceivers[key] = receiver
 		}
 	}
 
 	if len(missingKeys) == 0 {
 		return nil
 	}
+	if _, err := resolveTTL(expire, c.defaultTTL); err != nil {
+		return err
+	}
+	if loader == nil {
+		return fmt.Errorf("cache: loader must not be nil")
+	}
 
 	results, err := loader(ctx, missingKeys)
 	if err != nil {
-		for _, key := range missingKeys {
-			delete(receiverMap, key)
-		}
 		return err
 	}
 
+	encodedMap := make(map[string]any, len(missingKeys))
+	var nilKeys []string
 	for i, key := range missingKeys {
 		if i >= len(results) || results[i] == nil {
-			delete(receiverMap, key)
+			nilKeys = append(nilKeys, key)
 			continue
 		}
 
-		_ = c.Set(ctx, key, results[i], expire)
-
-		if receiver, ok := missingReceivers[key]; ok {
-			if err := setReceiver(receiver, results[i]); err != nil {
-				delete(receiverMap, key)
-			}
+		encoded, err := c.codec.encode(results[i])
+		if err != nil {
+			return fmt.Errorf("cache: failed to encode value for key %q: %w", key, err)
 		}
-	}
-	return nil
-}
-
-func (c *RistrettoCache) Incr(_ context.Context, key string, delta int64, expire time.Duration, _ ...cachespi.OperationOption) (int64, error) {
-	ttl := c.resolveTTL(expire)
-	val, found := c.cache.Get(key)
-	var current int64
-	if found {
-		switch v := val.(type) {
-		case int64:
-			current = v
-		case int:
-			current = int64(v)
-		default:
-			return 0, fmt.Errorf("cache: key %q holds non-integer value of type %T", key, val)
+		if err := c.codec.decode(encoded, receiverMap[key]); err != nil {
+			return fmt.Errorf("cache: key %q: %w", key, err)
 		}
+		encodedMap[key] = encoded
 	}
-	newVal := current + delta
-	c.cache.SetWithTTL(key, newVal, 1, ttl)
-	c.cache.Wait()
-	return newVal, nil
-}
-
-func (c *RistrettoCache) Flush(_ context.Context) error {
-	// Clear() is synchronous — it stops processItems, drains setBuf,
-	// clears storedItems + policy, then restarts processItems.
-	c.cache.Clear()
+	if err := c.setManyEncoded(encodedMap, expire); err != nil {
+		return err
+	}
+	for _, key := range nilKeys {
+		delete(receiverMap, key)
+	}
 	return nil
 }
 
 func (c *RistrettoCache) Ping(_ context.Context) error {
 	return nil
-}
-
-// setReceiver copies the cached value into the receiver pointer via reflection.
-func setReceiver(receiver any, value any) error {
-	if receiver == nil {
-		return fmt.Errorf("cache: receiver must be a non-nil pointer")
-	}
-	rv := reflect.ValueOf(receiver)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
-		return fmt.Errorf("cache: receiver must be a non-nil pointer")
-	}
-
-	val := reflect.ValueOf(value)
-	targetType := rv.Elem().Type()
-
-	if val.Type().AssignableTo(targetType) {
-		rv.Elem().Set(val)
-		return nil
-	}
-
-	if val.Kind() == reflect.Ptr && !val.IsNil() && val.Elem().Type().AssignableTo(targetType) {
-		rv.Elem().Set(val.Elem())
-		return nil
-	}
-
-	return fmt.Errorf("cache: cannot assign %T to %s", value, targetType)
 }

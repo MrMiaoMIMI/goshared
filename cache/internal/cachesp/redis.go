@@ -2,7 +2,6 @@ package cachesp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -26,7 +25,7 @@ type redisConfig struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	defaultTTL   time.Duration
-	client       redis.UniversalClient // allow injecting a pre-built client
+	codec        cachespi.Codec
 }
 
 func defaultRedisConfig() *redisConfig {
@@ -87,58 +86,54 @@ func WithRedisDefaultTTL(d time.Duration) RedisOption {
 	return func(c *redisConfig) { c.defaultTTL = d }
 }
 
-// WithRedisClient allows injecting a pre-configured redis.UniversalClient.
-// When set, all connection options (addr, password, etc.) are ignored.
-func WithRedisClient(client redis.UniversalClient) RedisOption {
-	return func(c *redisConfig) { c.client = client }
+// WithRedisCodec sets the byte serializer used by RedisCache.
+func WithRedisCodec(codec cachespi.Codec) RedisOption {
+	return func(c *redisConfig) { c.codec = codec }
 }
 
 // RedisCache implements cachespi.Cache using Redis as the backend.
-// Values are serialized/deserialized using JSON.
+// Values are serialized/deserialized using the configured codec.
 type RedisCache struct {
-	client     redis.UniversalClient
+	client     *redis.Client
 	defaultTTL time.Duration
+	codec      binaryValueCodec
 }
 
 // NewRedisCache creates a new Cache backed by Redis.
-func NewRedisCache(opts ...RedisOption) cachespi.Cache {
+func NewRedisCache(opts ...RedisOption) (*RedisCache, error) {
 	cfg := defaultRedisConfig()
 	for _, opt := range opts {
-		opt(cfg)
+		if opt != nil {
+			opt(cfg)
+		}
+	}
+	if _, err := resolveTTL(cachespi.DefaultExpiration, cfg.defaultTTL); err != nil {
+		return nil, err
 	}
 
-	client := cfg.client
-	if client == nil {
-		client = redis.NewClient(&redis.Options{
-			Addr:         cfg.addr,
-			Password:     cfg.password,
-			DB:           cfg.db,
-			PoolSize:     cfg.poolSize,
-			MinIdleConns: cfg.minIdleConns,
-			DialTimeout:  cfg.dialTimeout,
-			ReadTimeout:  cfg.readTimeout,
-			WriteTimeout: cfg.writeTimeout,
-		})
-	}
+	client := redis.NewClient(&redis.Options{
+		Addr:         cfg.addr,
+		Password:     cfg.password,
+		DB:           cfg.db,
+		PoolSize:     cfg.poolSize,
+		MinIdleConns: cfg.minIdleConns,
+		DialTimeout:  cfg.dialTimeout,
+		ReadTimeout:  cfg.readTimeout,
+		WriteTimeout: cfg.writeTimeout,
+	})
 
 	return &RedisCache{
 		client:     client,
 		defaultTTL: cfg.defaultTTL,
-	}
+		codec:      newBinaryValueCodec(cfg.codec),
+	}, nil
 }
 
-func (c *RedisCache) resolveTTL(expire time.Duration) time.Duration {
-	switch expire {
-	case cachespi.NoExpiration:
-		return 0
-	case cachespi.DefaultExpiration:
-		return c.defaultTTL
-	default:
-		return expire
-	}
+func (c *RedisCache) Close(_ context.Context) error {
+	return c.client.Close()
 }
 
-func (c *RedisCache) Get(ctx context.Context, key string, receiver any, _ ...cachespi.OperationOption) error {
+func (c *RedisCache) Get(ctx context.Context, key string, receiver any) error {
 	data, err := c.client.Get(ctx, key).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return cachespi.ErrCacheMiss
@@ -146,10 +141,10 @@ func (c *RedisCache) Get(ctx context.Context, key string, receiver any, _ ...cac
 	if err != nil {
 		return fmt.Errorf("cache: redis GET %q: %w", key, err)
 	}
-	return json.Unmarshal(data, receiver)
+	return c.codec.decodeBytes(data, receiver)
 }
 
-func (c *RedisCache) GetOrDefault(ctx context.Context, key string, defaultVal any, receiver any, _ ...cachespi.OperationOption) error {
+func (c *RedisCache) GetOrDefault(ctx context.Context, key string, defaultVal any, receiver any) error {
 	data, err := c.client.Get(ctx, key).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return setReceiver(receiver, defaultVal)
@@ -157,10 +152,10 @@ func (c *RedisCache) GetOrDefault(ctx context.Context, key string, defaultVal an
 	if err != nil {
 		return fmt.Errorf("cache: redis GET %q: %w", key, err)
 	}
-	return json.Unmarshal(data, receiver)
+	return c.codec.decodeBytes(data, receiver)
 }
 
-func (c *RedisCache) Exists(ctx context.Context, key string, _ ...cachespi.OperationOption) (bool, error) {
+func (c *RedisCache) Exists(ctx context.Context, key string) (bool, error) {
 	n, err := c.client.Exists(ctx, key).Result()
 	if err != nil {
 		return false, fmt.Errorf("cache: redis EXISTS %q: %w", key, err)
@@ -168,7 +163,11 @@ func (c *RedisCache) Exists(ctx context.Context, key string, _ ...cachespi.Opera
 	return n > 0, nil
 }
 
-func (c *RedisCache) GetMany(ctx context.Context, receiverMap map[string]any, _ ...cachespi.OperationOption) error {
+func (c *RedisCache) GetMany(ctx context.Context, receiverMap map[string]any) error {
+	if len(receiverMap) == 0 {
+		return nil
+	}
+
 	keys := make([]string, 0, len(receiverMap))
 	for k := range receiverMap {
 		keys = append(keys, k)
@@ -179,38 +178,47 @@ func (c *RedisCache) GetMany(ctx context.Context, receiverMap map[string]any, _ 
 		return fmt.Errorf("cache: redis MGET: %w", err)
 	}
 
+	var missingKeys []string
 	for i, key := range keys {
 		if vals[i] == nil {
-			delete(receiverMap, key)
+			missingKeys = append(missingKeys, key)
 			continue
 		}
-		str, ok := vals[i].(string)
-		if !ok {
-			delete(receiverMap, key)
-			continue
+		data, dataErr := bytesFromStoredValue(vals[i])
+		if dataErr != nil {
+			return fmt.Errorf("cache: redis MGET %q: %w", key, dataErr)
 		}
-		if err := json.Unmarshal([]byte(str), receiverMap[key]); err != nil {
-			delete(receiverMap, key)
+		if err := c.codec.decodeBytes(data, receiverMap[key]); err != nil {
+			return fmt.Errorf("cache: redis MGET %q: %w", key, err)
 		}
+	}
+	for _, key := range missingKeys {
+		delete(receiverMap, key)
 	}
 	return nil
 }
 
-func (c *RedisCache) Set(ctx context.Context, key string, value any, expire time.Duration, _ ...cachespi.OperationOption) error {
-	data, err := json.Marshal(value)
+func (c *RedisCache) Set(ctx context.Context, key string, value any, expire time.Duration) error {
+	ttl, err := resolveTTL(expire, c.defaultTTL)
 	if err != nil {
-		return fmt.Errorf("cache: failed to marshal value for key %q: %w", key, err)
+		return err
 	}
-	ttl := c.resolveTTL(expire)
+	data, err := c.codec.encodeBytes(value)
+	if err != nil {
+		return fmt.Errorf("cache: failed to encode value for key %q: %w", key, err)
+	}
 	return c.client.Set(ctx, key, data, ttl).Err()
 }
 
-func (c *RedisCache) SetNX(ctx context.Context, key string, value any, expire time.Duration, _ ...cachespi.OperationOption) (bool, error) {
-	data, err := json.Marshal(value)
+func (c *RedisCache) SetNX(ctx context.Context, key string, value any, expire time.Duration) (bool, error) {
+	ttl, err := resolveTTL(expire, c.defaultTTL)
 	if err != nil {
-		return false, fmt.Errorf("cache: failed to marshal value for key %q: %w", key, err)
+		return false, err
 	}
-	ttl := c.resolveTTL(expire)
+	data, err := c.codec.encodeBytes(value)
+	if err != nil {
+		return false, fmt.Errorf("cache: failed to encode value for key %q: %w", key, err)
+	}
 	ok, err := c.client.SetNX(ctx, key, data, ttl).Result()
 	if err != nil {
 		return false, fmt.Errorf("cache: redis SETNX %q: %w", key, err)
@@ -218,7 +226,7 @@ func (c *RedisCache) SetNX(ctx context.Context, key string, value any, expire ti
 	return ok, nil
 }
 
-func (c *RedisCache) GetAndDelete(ctx context.Context, key string, receiver any, _ ...cachespi.OperationOption) error {
+func (c *RedisCache) GetAndDelete(ctx context.Context, key string, receiver any) error {
 	data, err := c.client.GetDel(ctx, key).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return cachespi.ErrCacheMiss
@@ -226,24 +234,41 @@ func (c *RedisCache) GetAndDelete(ctx context.Context, key string, receiver any,
 	if err != nil {
 		return fmt.Errorf("cache: redis GETDEL %q: %w", key, err)
 	}
-	return json.Unmarshal(data, receiver)
+	return c.codec.decodeBytes(data, receiver)
 }
 
-func (c *RedisCache) SetMany(ctx context.Context, valueMap map[string]any, expire time.Duration, _ ...cachespi.OperationOption) error {
-	ttl := c.resolveTTL(expire)
-	pipe := c.client.Pipeline()
+func (c *RedisCache) SetMany(ctx context.Context, valueMap map[string]any, expire time.Duration) error {
+	if len(valueMap) == 0 {
+		return nil
+	}
+	dataMap := make(map[string][]byte, len(valueMap))
 	for key, value := range valueMap {
-		data, err := json.Marshal(value)
+		data, err := c.codec.encodeBytes(value)
 		if err != nil {
-			return fmt.Errorf("cache: failed to marshal value for key %q: %w", key, err)
+			return fmt.Errorf("cache: failed to encode value for key %q: %w", key, err)
 		}
+		dataMap[key] = data
+	}
+	return c.setManyEncoded(ctx, dataMap, expire)
+}
+
+func (c *RedisCache) setManyEncoded(ctx context.Context, dataMap map[string][]byte, expire time.Duration) error {
+	if len(dataMap) == 0 {
+		return nil
+	}
+	ttl, err := resolveTTL(expire, c.defaultTTL)
+	if err != nil {
+		return err
+	}
+	pipe := c.client.Pipeline()
+	for key, data := range dataMap {
 		pipe.Set(ctx, key, data, ttl)
 	}
-	_, err := pipe.Exec(ctx)
+	_, err = pipe.Exec(ctx)
 	return err
 }
 
-func (c *RedisCache) Delete(ctx context.Context, key string, _ ...cachespi.OperationOption) error {
+func (c *RedisCache) Delete(ctx context.Context, key string) error {
 	n, err := c.client.Del(ctx, key).Result()
 	if err != nil {
 		return fmt.Errorf("cache: redis DEL %q: %w", key, err)
@@ -254,7 +279,7 @@ func (c *RedisCache) Delete(ctx context.Context, key string, _ ...cachespi.Opera
 	return nil
 }
 
-func (c *RedisCache) DeleteMany(ctx context.Context, keys []string, _ ...cachespi.OperationOption) error {
+func (c *RedisCache) DeleteMany(ctx context.Context, keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
@@ -262,10 +287,19 @@ func (c *RedisCache) DeleteMany(ctx context.Context, keys []string, _ ...cachesp
 }
 
 func (c *RedisCache) Load(ctx context.Context, loader cachespi.DataLoader, key string, receiver any,
-	expire time.Duration, _ ...cachespi.OperationOption) error {
+	expire time.Duration) error {
 
 	if err := c.Get(ctx, key, receiver); err == nil {
 		return nil
+	} else if !errors.Is(err, cachespi.ErrCacheMiss) {
+		return err
+	}
+	ttl, err := resolveTTL(expire, c.defaultTTL)
+	if err != nil {
+		return err
+	}
+	if loader == nil {
+		return fmt.Errorf("cache: loader must not be nil")
 	}
 
 	results, err := loader(ctx, []string{key})
@@ -276,17 +310,25 @@ func (c *RedisCache) Load(ctx context.Context, loader cachespi.DataLoader, key s
 		return cachespi.ErrCacheMiss
 	}
 
-	_ = c.Set(ctx, key, results[0], expire)
-
-	data, err := json.Marshal(results[0])
+	data, err := c.codec.encodeBytes(results[0])
 	if err != nil {
+		return fmt.Errorf("cache: failed to encode value for key %q: %w", key, err)
+	}
+	if err := c.codec.decodeBytes(data, receiver); err != nil {
 		return err
 	}
-	return json.Unmarshal(data, receiver)
+	if err := c.client.Set(ctx, key, data, ttl).Err(); err != nil {
+		return fmt.Errorf("cache: redis SET %q: %w", key, err)
+	}
+	return nil
 }
 
 func (c *RedisCache) LoadMany(ctx context.Context, loader cachespi.DataLoader, receiverMap map[string]any,
-	expire time.Duration, _ ...cachespi.OperationOption) error {
+	expire time.Duration) error {
+
+	if len(receiverMap) == 0 {
+		return nil
+	}
 
 	var missingKeys []string
 
@@ -297,74 +339,61 @@ func (c *RedisCache) LoadMany(ctx context.Context, loader cachespi.DataLoader, r
 
 	vals, err := c.client.MGet(ctx, keys...).Result()
 	if err != nil {
-		missingKeys = keys
-	} else {
-		for i, key := range keys {
-			if vals[i] == nil {
-				missingKeys = append(missingKeys, key)
-				continue
-			}
-			str, ok := vals[i].(string)
-			if !ok {
-				missingKeys = append(missingKeys, key)
-				continue
-			}
-			if jsonErr := json.Unmarshal([]byte(str), receiverMap[key]); jsonErr != nil {
-				missingKeys = append(missingKeys, key)
-			}
+		return fmt.Errorf("cache: redis MGET: %w", err)
+	}
+	for i, key := range keys {
+		if vals[i] == nil {
+			missingKeys = append(missingKeys, key)
+			continue
+		}
+		data, dataErr := bytesFromStoredValue(vals[i])
+		if dataErr != nil {
+			return fmt.Errorf("cache: redis MGET %q: %w", key, dataErr)
+		}
+		if jsonErr := c.codec.decodeBytes(data, receiverMap[key]); jsonErr != nil {
+			return fmt.Errorf("cache: redis MGET %q: %w", key, jsonErr)
 		}
 	}
 
 	if len(missingKeys) == 0 {
 		return nil
 	}
+	if _, err := resolveTTL(expire, c.defaultTTL); err != nil {
+		return err
+	}
+	if loader == nil {
+		return fmt.Errorf("cache: loader must not be nil")
+	}
 
 	results, err := loader(ctx, missingKeys)
 	if err != nil {
-		for _, key := range missingKeys {
-			delete(receiverMap, key)
-		}
 		return err
 	}
 
+	dataMap := make(map[string][]byte, len(missingKeys))
+	var nilKeys []string
 	for i, key := range missingKeys {
 		if i >= len(results) || results[i] == nil {
-			delete(receiverMap, key)
+			nilKeys = append(nilKeys, key)
 			continue
 		}
 
-		_ = c.Set(ctx, key, results[i], expire)
-
-		data, marshalErr := json.Marshal(results[i])
-		if marshalErr != nil {
-			delete(receiverMap, key)
-			continue
+		data, encodeErr := c.codec.encodeBytes(results[i])
+		if encodeErr != nil {
+			return fmt.Errorf("cache: failed to encode value for key %q: %w", key, encodeErr)
 		}
-		if jsonErr := json.Unmarshal(data, receiverMap[key]); jsonErr != nil {
-			delete(receiverMap, key)
+		if jsonErr := c.codec.decodeBytes(data, receiverMap[key]); jsonErr != nil {
+			return fmt.Errorf("cache: key %q: %w", key, jsonErr)
 		}
+		dataMap[key] = data
+	}
+	if err := c.setManyEncoded(ctx, dataMap, expire); err != nil {
+		return err
+	}
+	for _, key := range nilKeys {
+		delete(receiverMap, key)
 	}
 	return nil
-}
-
-func (c *RedisCache) Incr(ctx context.Context, key string, delta int64, expire time.Duration, _ ...cachespi.OperationOption) (int64, error) {
-	newVal, err := c.client.IncrBy(ctx, key, delta).Result()
-	if err != nil {
-		return 0, fmt.Errorf("cache: redis INCRBY %q: %w", key, err)
-	}
-
-	ttl := c.resolveTTL(expire)
-	if ttl > 0 {
-		if expErr := c.client.Expire(ctx, key, ttl).Err(); expErr != nil {
-			return newVal, fmt.Errorf("cache: redis EXPIRE %q: %w", key, expErr)
-		}
-	}
-
-	return newVal, nil
-}
-
-func (c *RedisCache) Flush(ctx context.Context) error {
-	return c.client.FlushDB(ctx).Err()
 }
 
 func (c *RedisCache) Ping(ctx context.Context) error {
