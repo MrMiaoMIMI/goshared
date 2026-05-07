@@ -61,7 +61,7 @@ func NewConsumer(config *mqspi.ConsumerConfig) (mqspi.Consumer, error) {
 	c := &SaramaConsumer{
 		consumerGroup: consumerGroup,
 		topics:        topics,
-		msgChan:       make(chan *wrappedMessage, defaultConsumerBuffer),
+		msgChan:       make(chan *wrappedMessage, consumerBufferSize(config)),
 		ctx:           ctx,
 		cancel:        cancel,
 	}

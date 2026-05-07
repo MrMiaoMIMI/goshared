@@ -38,7 +38,9 @@ func NewProducer(config *mqspi.ProducerConfig) (mqspi.Producer, error) {
 	saramaConfig.Producer.Return.Successes = true
 	saramaConfig.Producer.Return.Errors = true
 	saramaConfig.Producer.RequiredAcks = sarama.WaitForAll
-	saramaConfig.Producer.Retry.Max = 3
+	saramaConfig.Producer.Retry.Max = producerRetryMax(config)
+	saramaConfig.Producer.Retry.Backoff = producerRetryBackoff(config)
+	saramaConfig.Producer.Compression = producerCompressionCodec(config.Compression)
 	applySASL(saramaConfig, config.Credentials)
 
 	brokers := cleanStrings(config.Brokers)
@@ -65,6 +67,21 @@ func NewProducer(config *mqspi.ProducerConfig) (mqspi.Producer, error) {
 	go p.handleAsyncErrors()
 
 	return p, nil
+}
+
+func producerCompressionCodec(compression mqspi.ProducerCompression) sarama.CompressionCodec {
+	switch normalizedProducerCompression(compression) {
+	case mqspi.ProducerCompressionGZIP:
+		return sarama.CompressionGZIP
+	case mqspi.ProducerCompressionSnappy:
+		return sarama.CompressionSnappy
+	case mqspi.ProducerCompressionLZ4:
+		return sarama.CompressionLZ4
+	case mqspi.ProducerCompressionZSTD:
+		return sarama.CompressionZSTD
+	default:
+		return sarama.CompressionNone
+	}
 }
 
 func (p *SaramaProducer) resolveTopic(msgTopic string) (string, error) {

@@ -7,6 +7,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/dgraph-io/ristretto/v2 v2.4.0
 	github.com/gin-gonic/gin v1.11.0
+	github.com/goccy/go-yaml v1.18.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/xdg-go/scram v1.2.0
 	go.uber.org/zap v1.27.1
@@ -32,7 +33,6 @@ require (
 	github.com/go-playground/validator/v10 v10.27.0 // indirect
 	github.com/go-sql-driver/mysql v1.7.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
-	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect
 	github.com/jcmturner/dnsutils/v2 v2.0.0 // indirect

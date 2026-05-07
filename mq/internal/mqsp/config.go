@@ -3,11 +3,10 @@ package mqsp
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/MrMiaoMIMI/goshared/mq/mqspi"
 )
-
-const defaultConsumerBuffer = 256
 
 func validateProducerConfig(config *mqspi.ProducerConfig) error {
 	if config == nil {
@@ -17,6 +16,15 @@ func validateProducerConfig(config *mqspi.ProducerConfig) error {
 		return fmt.Errorf("%w: producer brokers is empty", mqspi.ErrInvalidConfig)
 	}
 	if err := validateCredentials(config.Credentials); err != nil {
+		return err
+	}
+	if config.RetryMax != nil && *config.RetryMax < 0 {
+		return fmt.Errorf("%w: producer retry_max must be >= 0", mqspi.ErrInvalidConfig)
+	}
+	if config.RetryBackoff < 0 {
+		return fmt.Errorf("%w: producer retry_backoff must be >= 0", mqspi.ErrInvalidConfig)
+	}
+	if err := validateProducerCompression(config.Compression); err != nil {
 		return err
 	}
 	return nil
@@ -41,7 +49,29 @@ func validateConsumerConfig(config *mqspi.ConsumerConfig) error {
 	if err := validateFailurePolicy(config.FailurePolicy); err != nil {
 		return err
 	}
+	if config.BatchSize < 0 {
+		return fmt.Errorf("%w: consumer batch_size must be >= 0", mqspi.ErrInvalidConfig)
+	}
+	if config.BatchWait < 0 {
+		return fmt.Errorf("%w: consumer batch_wait must be >= 0", mqspi.ErrInvalidConfig)
+	}
+	if config.BufferSize < 0 {
+		return fmt.Errorf("%w: consumer buffer_size must be >= 0", mqspi.ErrInvalidConfig)
+	}
 	return nil
+}
+
+func validateProducerCompression(compression mqspi.ProducerCompression) error {
+	switch normalizedProducerCompression(compression) {
+	case mqspi.ProducerCompressionNone,
+		mqspi.ProducerCompressionGZIP,
+		mqspi.ProducerCompressionSnappy,
+		mqspi.ProducerCompressionLZ4,
+		mqspi.ProducerCompressionZSTD:
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported producer compression %q", mqspi.ErrInvalidConfig, compression)
+	}
 }
 
 func validateFailurePolicy(policy *mqspi.ConsumerFailurePolicy) error {
@@ -79,6 +109,58 @@ func consumerTopics(config *mqspi.ConsumerConfig) []string {
 		return []string{topic}
 	}
 	return nil
+}
+
+func producerRetryMax(config *mqspi.ProducerConfig) int {
+	if config == nil || config.RetryMax == nil {
+		return mqspi.DefaultProducerRetryMax
+	}
+	return *config.RetryMax
+}
+
+func producerRetryBackoff(config *mqspi.ProducerConfig) time.Duration {
+	if config == nil || config.RetryBackoff <= 0 {
+		return mqspi.DefaultProducerRetryBackoff
+	}
+	return config.RetryBackoff
+}
+
+func normalizedProducerCompression(compression mqspi.ProducerCompression) mqspi.ProducerCompression {
+	switch strings.ToLower(strings.TrimSpace(string(compression))) {
+	case "", string(mqspi.ProducerCompressionNone):
+		return mqspi.ProducerCompressionNone
+	case string(mqspi.ProducerCompressionGZIP):
+		return mqspi.ProducerCompressionGZIP
+	case string(mqspi.ProducerCompressionSnappy):
+		return mqspi.ProducerCompressionSnappy
+	case string(mqspi.ProducerCompressionLZ4):
+		return mqspi.ProducerCompressionLZ4
+	case string(mqspi.ProducerCompressionZSTD):
+		return mqspi.ProducerCompressionZSTD
+	default:
+		return compression
+	}
+}
+
+func consumerBatchSize(config *mqspi.ConsumerConfig) int {
+	if config == nil || config.BatchSize <= 0 {
+		return mqspi.DefaultConsumerBatchSize
+	}
+	return config.BatchSize
+}
+
+func consumerBatchWait(config *mqspi.ConsumerConfig) time.Duration {
+	if config == nil || config.BatchWait <= 0 {
+		return mqspi.DefaultConsumerBatchWait
+	}
+	return config.BatchWait
+}
+
+func consumerBufferSize(config *mqspi.ConsumerConfig) int {
+	if config == nil || config.BufferSize <= 0 {
+		return mqspi.DefaultConsumerBufferSize
+	}
+	return config.BufferSize
 }
 
 func cleanStrings(values []string) []string {

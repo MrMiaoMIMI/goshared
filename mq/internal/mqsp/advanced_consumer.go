@@ -14,13 +14,13 @@ import (
 
 var _ mqspi.AdvancedConsumer = (*SaramaAdvancedConsumer)(nil)
 
-const defaultBatchSize = 100
-
 type SaramaAdvancedConsumer struct {
 	consumerGroup  sarama.ConsumerGroup
 	topics         []string
 	processor      mqspi.MessageProcessor
 	batchProcessor mqspi.BatchMessageProcessor
+	batchSize      int
+	batchWait      time.Duration
 	strategy       mqspi.ConsumerFailureStrategy
 	failures       *failureTracker
 
@@ -68,6 +68,8 @@ func newAdvancedConsumer(config *mqspi.ConsumerConfig, processor mqspi.MessagePr
 		topics:         topics,
 		processor:      processor,
 		batchProcessor: batchProcessor,
+		batchSize:      consumerBatchSize(config),
+		batchWait:      consumerBatchWait(config),
 		strategy:       consumerFailureStrategy(config),
 		failures:       newFailureTracker(),
 		ctx:            ctx,
@@ -93,6 +95,8 @@ func (c *SaramaAdvancedConsumer) Run(ctx context.Context) error {
 	handler := &advancedConsumerHandler{
 		processor:      c.processor,
 		batchProcessor: c.batchProcessor,
+		batchSize:      c.batchSize,
+		batchWait:      c.batchWait,
 		strategy:       c.strategy,
 		failures:       c.failures,
 	}
@@ -141,6 +145,8 @@ func (c *SaramaAdvancedConsumer) Close(_ context.Context) error {
 type advancedConsumerHandler struct {
 	processor      mqspi.MessageProcessor
 	batchProcessor mqspi.BatchMessageProcessor
+	batchSize      int
+	batchWait      time.Duration
 	strategy       mqspi.ConsumerFailureStrategy
 	failures       *failureTracker
 }
@@ -185,9 +191,12 @@ func (h *advancedConsumerHandler) consumeClaimSingle(session sarama.ConsumerGrou
 
 func (h *advancedConsumerHandler) consumeClaimBatch(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	for {
-		batch := make([]*sarama.ConsumerMessage, 0, defaultBatchSize)
+		batchSize := h.batchSize
+		if batchSize <= 0 {
+			batchSize = mqspi.DefaultConsumerBatchSize
+		}
+		batch := make([]*sarama.ConsumerMessage, 0, batchSize)
 
-		// Block until we get at least one message
 		select {
 		case raw, ok := <-claim.Messages():
 			if !ok {
@@ -198,19 +207,12 @@ func (h *advancedConsumerHandler) consumeClaimBatch(session sarama.ConsumerGroup
 			return nil
 		}
 
-		// Drain more messages non-blocking, up to batchSize
-	drain:
-		for len(batch) < defaultBatchSize {
-			select {
-			case raw, ok := <-claim.Messages():
-				if !ok {
-					break drain
-				}
-				batch = append(batch, raw)
-			default:
-				break drain
-			}
+		if h.batchWait > 0 {
+			batch = h.collectBatchUntilTimeout(session, claim, batch, batchSize)
+		} else {
+			batch = h.drainBatchNonBlocking(claim, batch, batchSize)
 		}
+
 		msgs := make([]*mqspi.ConsumerMessage, len(batch))
 		for i, raw := range batch {
 			msgs[i] = fromSaramaConsumerMessage(raw)
@@ -231,6 +233,41 @@ func (h *advancedConsumerHandler) consumeClaimBatch(session sarama.ConsumerGroup
 	}
 }
 
+func (h *advancedConsumerHandler) drainBatchNonBlocking(claim sarama.ConsumerGroupClaim, batch []*sarama.ConsumerMessage, batchSize int) []*sarama.ConsumerMessage {
+	for len(batch) < batchSize {
+		select {
+		case raw, ok := <-claim.Messages():
+			if !ok {
+				return batch
+			}
+			batch = append(batch, raw)
+		default:
+			return batch
+		}
+	}
+	return batch
+}
+
+func (h *advancedConsumerHandler) collectBatchUntilTimeout(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim, batch []*sarama.ConsumerMessage, batchSize int) []*sarama.ConsumerMessage {
+	timer := time.NewTimer(h.batchWait)
+	defer timer.Stop()
+
+	for len(batch) < batchSize {
+		select {
+		case raw, ok := <-claim.Messages():
+			if !ok {
+				return batch
+			}
+			batch = append(batch, raw)
+		case <-timer.C:
+			return batch
+		case <-session.Context().Done():
+			return batch
+		}
+	}
+	return batch
+}
+
 func (h *advancedConsumerHandler) handleFailure(session sarama.ConsumerGroupSession, raws []*sarama.ConsumerMessage, msgs []*mqspi.ConsumerMessage, err error) error {
 	attempt := h.failures.increment(raws)
 	failure := &mqspi.ConsumerFailure{
@@ -244,7 +281,7 @@ func (h *advancedConsumerHandler) handleFailure(session sarama.ConsumerGroupSess
 
 	strategy := h.strategy
 	if strategy == nil {
-		strategy = mqspi.DefaultConsumerFailurePolicy()
+		strategy = newConsumerFailurePolicyStrategy(nil)
 	}
 	decision := normalizeFailureDecision(strategy.Decide(session.Context(), failure))
 	switch decision.Action {
@@ -287,10 +324,10 @@ func consumerFailureStrategy(config *mqspi.ConsumerConfig) mqspi.ConsumerFailure
 	if config != nil && config.FailureStrategy != nil {
 		return config.FailureStrategy
 	}
-	if config != nil && config.FailurePolicy != nil {
-		return config.FailurePolicy
+	if config != nil {
+		return newConsumerFailurePolicyStrategy(config.FailurePolicy)
 	}
-	return mqspi.DefaultConsumerFailurePolicy()
+	return newConsumerFailurePolicyStrategy(nil)
 }
 
 type processFailureError struct {

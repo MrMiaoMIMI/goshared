@@ -52,10 +52,10 @@ type ConsumerFailureStrategy interface {
 	Decide(ctx context.Context, failure *ConsumerFailure) ConsumerFailureDecision
 }
 
-// ConsumerFailurePolicy is the default configurable failure strategy for AdvancedConsumer.
+// ConsumerFailurePolicy configures the default failure strategy for AdvancedConsumer.
 // MaxAttempts <= 0 means retry forever. FinalAction is used after MaxAttempts is reached.
-// The policy never sends messages to DLQ. It is a plain config struct; Handler
-// is intentionally excluded from JSON and YAML.
+// The policy never sends messages to DLQ. Handler is code-only and is intentionally
+// excluded from JSON and YAML.
 type ConsumerFailurePolicy struct {
 	// MaxAttempts is the maximum attempt count before FinalAction is applied.
 	// Values <= 0 mean retry forever.
@@ -70,82 +70,4 @@ type ConsumerFailurePolicy struct {
 	FinalAction ConsumerFailureAction `json:"final_action,omitempty" yaml:"final_action,omitempty"`
 	// Handler is called on every failure before the decision is returned.
 	Handler ConsumerFailureHandler `json:"-" yaml:"-"`
-}
-
-// DefaultConsumerFailurePolicy returns the default advanced-consumer failure policy:
-// retry forever with exponential backoff from 1s to 30s.
-func DefaultConsumerFailurePolicy() *ConsumerFailurePolicy {
-	return &ConsumerFailurePolicy{
-		InitialBackoff:    DefaultFailureInitialBackoff,
-		MaxBackoff:        DefaultFailureMaxBackoff,
-		BackoffMultiplier: DefaultFailureBackoffMultiple,
-		FinalAction:       ConsumerFailureActionStop,
-	}
-}
-
-// Decide implements ConsumerFailureStrategy.
-func (p *ConsumerFailurePolicy) Decide(ctx context.Context, failure *ConsumerFailure) ConsumerFailureDecision {
-	policy := normalizeConsumerFailurePolicy(p)
-	if policy.Handler != nil {
-		policy.Handler(ctx, failure)
-	}
-
-	if policy.MaxAttempts > 0 && failure != nil && failure.Attempt >= policy.MaxAttempts {
-		if policy.FinalAction == ConsumerFailureActionRetry {
-			return ConsumerFailureDecision{
-				Action:  ConsumerFailureActionRetry,
-				Backoff: policy.backoff(failureAttempt(failure)),
-			}
-		}
-		return ConsumerFailureDecision{Action: policy.FinalAction}
-	}
-
-	return ConsumerFailureDecision{
-		Action:  ConsumerFailureActionRetry,
-		Backoff: policy.backoff(failureAttempt(failure)),
-	}
-}
-
-func normalizeConsumerFailurePolicy(policy *ConsumerFailurePolicy) ConsumerFailurePolicy {
-	if policy == nil {
-		return *DefaultConsumerFailurePolicy()
-	}
-
-	out := *policy
-	if out.InitialBackoff <= 0 {
-		out.InitialBackoff = DefaultFailureInitialBackoff
-	}
-	if out.MaxBackoff <= 0 {
-		out.MaxBackoff = DefaultFailureMaxBackoff
-	}
-	if out.BackoffMultiplier <= 1 {
-		out.BackoffMultiplier = DefaultFailureBackoffMultiple
-	}
-	if out.FinalAction == "" {
-		out.FinalAction = ConsumerFailureActionStop
-	}
-	return out
-}
-
-func (p ConsumerFailurePolicy) backoff(attempt int) time.Duration {
-	if attempt <= 1 {
-		return p.InitialBackoff
-	}
-
-	backoff := p.InitialBackoff
-	for i := 1; i < attempt; i++ {
-		next := time.Duration(float64(backoff) * p.BackoffMultiplier)
-		if next <= 0 || next >= p.MaxBackoff {
-			return p.MaxBackoff
-		}
-		backoff = next
-	}
-	return backoff
-}
-
-func failureAttempt(failure *ConsumerFailure) int {
-	if failure == nil || failure.Attempt <= 0 {
-		return 1
-	}
-	return failure.Attempt
 }

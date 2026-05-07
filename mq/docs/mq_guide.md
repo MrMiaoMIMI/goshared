@@ -125,6 +125,25 @@ if err != nil {
 err = producer.Produce(ctx, msg)
 ```
 
+### 3.5 发送策略配置
+
+Producer 的重试和压缩策略通过 `ProducerConfig` 配置，不通过 option function。
+
+```yaml
+brokers:
+  - 127.0.0.1:9092
+topic: order-event-topic
+retry_max: 3
+retry_backoff: 100ms
+compression: none
+```
+
+- `retry_max` 默认为 `3`。显式配置 `0` 表示不重试。
+- `retry_backoff` 默认为 `100ms`。
+- `compression` 默认为 `none`。可选值：`none`、`gzip`、`snappy`、`lz4`、`zstd`。
+
+日志、埋点等大吞吐场景可以考虑 `snappy` 或 `lz4`；消息体大且带宽敏感时可以考虑 `zstd`。如果消息很小或 CPU 更敏感，保持 `none`。
+
 ---
 
 ## 4. Consumer 用法
@@ -213,7 +232,17 @@ defer consumer.Close(context.Background())
 return consumer.Run(ctx)
 ```
 
-当前 batch size 使用模块默认值。批量处理成功时整批提交；批量处理失败时整批进入失败策略。
+批量处理成功时整批提交；批量处理失败时整批进入失败策略。批量大小和等待时间通过 `ConsumerConfig` 配置：
+
+```yaml
+batch_size: 100
+batch_wait: 0s
+```
+
+- `batch_size` 默认为 `100`，表示每次最多交给 `BatchProcess` 的消息数。
+- `batch_wait` 默认为 `0s`，表示拿到第一条消息后只做一次非阻塞 drain，不额外等待。
+
+如果 topic 流量低但希望尽量凑批，可以设置 `batch_wait: 10ms` 到 `100ms`。如果处理延迟敏感，保持默认值。
 
 ---
 
@@ -283,7 +312,7 @@ failure_policy:
 
 ```go
 if cfg.FailurePolicy == nil {
-    cfg.FailurePolicy = mqspi.DefaultConsumerFailurePolicy()
+    cfg.FailurePolicy = &mqspi.ConsumerFailurePolicy{}
 }
 cfg.FailurePolicy.Handler = func(ctx context.Context, failure *mqspi.ConsumerFailure) {
     log.Printf("consume failed: attempt=%d err=%v", failure.Attempt, failure.Err)
@@ -326,6 +355,9 @@ cfg.FailureStrategy = &StopOnValidationErrorStrategy{}
 brokers:
   - 127.0.0.1:9092
 topic: order-event-topic
+retry_max: 3
+retry_backoff: 100ms
+compression: none
 credentials:
   username: admin
   password: secret
@@ -337,6 +369,9 @@ credentials:
 | `brokers` | 是 | Kafka broker 地址列表 |
 | `topic` | 否 | 默认发送 topic；如果消息设置了 topic，会覆盖该值 |
 | `credentials` | 否 | SASL 认证配置 |
+| `retry_max` | 否 | 发送失败后的最大重试次数；默认 `3`；显式配置 `0` 表示不重试 |
+| `retry_backoff` | 否 | 两次发送重试之间的等待时间；默认 `100ms` |
+| `compression` | 否 | 压缩算法；默认 `none`；支持 `none`、`gzip`、`snappy`、`lz4`、`zstd` |
 
 ### 7.2 ConsumerConfig
 
@@ -348,6 +383,9 @@ topics:
   - order-event-topic
   - order-refund-topic
 group_id: order-service-group
+batch_size: 100
+batch_wait: 0s
+buffer_size: 256
 failure_policy:
   max_attempts: 3
   initial_backoff: 1s
@@ -364,8 +402,80 @@ failure_policy:
 | `group_id` | 是 | Kafka consumer group id |
 | `credentials` | 否 | SASL 认证配置 |
 | `failure_policy` | 否 | 仅 AdvancedConsumer 使用 |
+| `batch_size` | 否 | 仅 `NewAdvancedBatchConsumer` 使用；默认 `100` |
+| `batch_wait` | 否 | 仅 `NewAdvancedBatchConsumer` 使用；默认 `0s`，不额外等待凑批 |
+| `buffer_size` | 否 | 仅 manual `NewConsumer` 使用；内部消息缓冲大小，默认 `256` |
 
-### 7.3 SASL
+### 7.3 完整 YAML 加载示例
+
+配置文件示例：
+
+```yaml
+producer:
+  brokers:
+    - 127.0.0.1:9092
+  topic: order-event-topic
+  retry_max: 3
+  retry_backoff: 100ms
+  compression: snappy
+
+consumer:
+  brokers:
+    - 127.0.0.1:9092
+  topic: order-event-topic
+  group_id: order-service-group
+  buffer_size: 256
+
+advanced_consumer:
+  brokers:
+    - 127.0.0.1:9092
+  topic: order-event-topic
+  group_id: order-service-advanced-group
+  batch_size: 100
+  batch_wait: 20ms
+  failure_policy:
+    max_attempts: 3
+    initial_backoff: 1s
+    max_backoff: 30s
+    backoff_multiplier: 2
+    final_action: stop
+```
+
+加载配置并创建 MQ 对象：
+
+```go
+type MQConfig struct {
+    Producer         *mqspi.ProducerConfig `yaml:"producer"`
+    Consumer         *mqspi.ConsumerConfig `yaml:"consumer"`
+    AdvancedConsumer *mqspi.ConsumerConfig `yaml:"advanced_consumer"`
+}
+
+data, err := os.ReadFile("etc/mq.yml")
+if err != nil {
+    return err
+}
+
+var cfg MQConfig
+if err := yaml.Unmarshal(data, &cfg); err != nil {
+    return err
+}
+
+producer, err := mqhelper.NewProducer(cfg.Producer)
+if err != nil {
+    return err
+}
+defer producer.Close(context.Background())
+
+consumer, err := mqhelper.NewAdvancedConsumer(cfg.AdvancedConsumer, &OrderProcessor{})
+if err != nil {
+    return err
+}
+defer consumer.Close(context.Background())
+```
+
+上例可以使用 `github.com/goccy/go-yaml` 或其他支持 `time.Duration` 的 YAML 库。`retry_backoff`、`batch_wait`、`initial_backoff`、`max_backoff` 这类字段建议使用 `100ms`、`1s`、`30s` 这样的 Go duration 字符串。
+
+### 7.4 SASL
 
 支持的 mechanism：
 
