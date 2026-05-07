@@ -22,11 +22,6 @@ func ValueOr[T any](p *T, fallback T) T {
 	return *p
 }
 
-// IsNil returns true if the pointer is nil.
-func IsNil[T any](p *T) bool {
-	return p == nil
-}
-
 // Equal returns true if both pointers are nil, or both point to equal values.
 func Equal[T comparable](a, b *T) bool {
 	if a == nil && b == nil {

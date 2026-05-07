@@ -1,28 +1,28 @@
-// Package validator provides lightweight struct and value validation utilities.
+// Package validator provides small composable validation rules.
 package validator
 
 import (
+	"cmp"
 	"fmt"
-	"reflect"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 )
 
-// ValidationError represents a single validation failure.
-type ValidationError struct {
+// Error represents one validation failure.
+type Error struct {
 	Field   string
 	Message string
 }
 
-func (e *ValidationError) Error() string {
+func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
 
-// ValidationErrors is a collection of validation errors.
-type ValidationErrors []*ValidationError
+// Errors is a collection of validation failures.
+type Errors []*Error
 
-func (e ValidationErrors) Error() string {
+func (e Errors) Error() string {
 	msgs := make([]string, len(e))
 	for i, err := range e {
 		msgs[i] = err.Error()
@@ -30,155 +30,180 @@ func (e ValidationErrors) Error() string {
 	return strings.Join(msgs, "; ")
 }
 
-// HasErrors returns true if there are any validation errors.
-func (e ValidationErrors) HasErrors() bool {
-	return len(e) > 0
-}
-
-// ErrorOrNil returns nil if no errors, otherwise returns self.
-func (e ValidationErrors) ErrorOrNil() error {
-	if !e.HasErrors() {
+// Err returns nil when there are no validation failures.
+func (e Errors) Err() error {
+	if len(e) == 0 {
 		return nil
 	}
 	return e
 }
 
-// Validator builds validation rules fluently.
-type Validator struct {
-	errors ValidationErrors
+// Rule is one validation rule. It returns nil when the value is valid.
+type Rule func() *Error
+
+// Validate runs rules and returns all failures as one error.
+func Validate(rules ...Rule) error {
+	return Collect(rules...).Err()
 }
 
-// New creates a new Validator.
-func New() *Validator {
-	return &Validator{}
-}
-
-// Required checks that the string value is not empty.
-func (v *Validator) Required(field, value string) *Validator {
-	if strings.TrimSpace(value) == "" {
-		v.errors = append(v.errors, &ValidationError{Field: field, Message: "is required"})
+// Collect runs rules and returns all failures.
+func Collect(rules ...Rule) Errors {
+	errs := make(Errors, 0)
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		if err := rule(); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return v
+	return errs
 }
 
-// RequiredAny checks that the value is not nil/zero.
-func (v *Validator) RequiredAny(field string, value any) *Validator {
-	if value == nil || reflect.ValueOf(value).IsZero() {
-		v.errors = append(v.errors, &ValidationError{Field: field, Message: "is required"})
+// RequiredString checks that value is not empty after trimming spaces.
+func RequiredString(field, value string) Rule {
+	return func() *Error {
+		if strings.TrimSpace(value) == "" {
+			return fail(field, "is required")
+		}
+		return nil
 	}
-	return v
 }
 
-// MinLen checks that the string has at least minLen characters.
-func (v *Validator) MinLen(field, value string, minLen int) *Validator {
-	if utf8.RuneCountInString(value) < minLen {
-		v.errors = append(v.errors, &ValidationError{
-			Field:   field,
-			Message: fmt.Sprintf("must be at least %d characters", minLen),
-		})
+// Required checks that value is not the zero value of T.
+func Required[T comparable](field string, value T) Rule {
+	return func() *Error {
+		var zero T
+		if value == zero {
+			return fail(field, "is required")
+		}
+		return nil
 	}
-	return v
 }
 
-// MaxLen checks that the string has at most maxLen characters.
-func (v *Validator) MaxLen(field, value string, maxLen int) *Validator {
-	if utf8.RuneCountInString(value) > maxLen {
-		v.errors = append(v.errors, &ValidationError{
-			Field:   field,
-			Message: fmt.Sprintf("must be at most %d characters", maxLen),
-		})
+// MinLen checks that value has at least minLen runes.
+func MinLen(field, value string, minLen int) Rule {
+	return func() *Error {
+		if utf8.RuneCountInString(value) < minLen {
+			return fail(field, "must be at least %d characters", minLen)
+		}
+		return nil
 	}
-	return v
 }
 
-// Min checks that the numeric value is at least min.
-func (v *Validator) Min(field string, value, min int64) *Validator {
-	if value < min {
-		v.errors = append(v.errors, &ValidationError{
-			Field:   field,
-			Message: fmt.Sprintf("must be at least %d", min),
-		})
+// MaxLen checks that value has at most maxLen runes.
+func MaxLen(field, value string, maxLen int) Rule {
+	return func() *Error {
+		if utf8.RuneCountInString(value) > maxLen {
+			return fail(field, "must be at most %d characters", maxLen)
+		}
+		return nil
 	}
-	return v
 }
 
-// Max checks that the numeric value is at most max.
-func (v *Validator) Max(field string, value, max int64) *Validator {
-	if value > max {
-		v.errors = append(v.errors, &ValidationError{
-			Field:   field,
-			Message: fmt.Sprintf("must be at most %d", max),
-		})
+// Min checks that value is greater than or equal to min.
+func Min[T cmp.Ordered](field string, value, min T) Rule {
+	return func() *Error {
+		if value < min {
+			return fail(field, "must be at least %v", min)
+		}
+		return nil
 	}
-	return v
 }
 
-// Range checks that the numeric value is within [min, max].
-func (v *Validator) Range(field string, value, min, max int64) *Validator {
-	if value < min || value > max {
-		v.errors = append(v.errors, &ValidationError{
-			Field:   field,
-			Message: fmt.Sprintf("must be between %d and %d", min, max),
-		})
+// Max checks that value is less than or equal to max.
+func Max[T cmp.Ordered](field string, value, max T) Rule {
+	return func() *Error {
+		if value > max {
+			return fail(field, "must be at most %v", max)
+		}
+		return nil
 	}
-	return v
+}
+
+// Range checks that value is within [min, max].
+func Range[T cmp.Ordered](field string, value, min, max T) Rule {
+	return func() *Error {
+		if value < min || value > max {
+			return fail(field, "must be between %v and %v", min, max)
+		}
+		return nil
+	}
 }
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
-// Email checks that the value is a valid email address.
-func (v *Validator) Email(field, value string) *Validator {
-	if value != "" && !emailRegex.MatchString(value) {
-		v.errors = append(v.errors, &ValidationError{Field: field, Message: "must be a valid email address"})
-	}
-	return v
-}
-
-// MatchRegex checks that the value matches the given regex pattern.
-// If the pattern is invalid, a validation error is added.
-func (v *Validator) MatchRegex(field, value, pattern, message string) *Validator {
-	matched, err := regexp.MatchString(pattern, value)
-	if err != nil {
-		v.errors = append(v.errors, &ValidationError{
-			Field:   field,
-			Message: fmt.Sprintf("invalid regex pattern %q: %v", pattern, err),
-		})
-		return v
-	}
-	if !matched {
-		v.errors = append(v.errors, &ValidationError{Field: field, Message: message})
-	}
-	return v
-}
-
-// In checks that the value is one of the allowed values.
-func (v *Validator) In(field string, value string, allowed ...string) *Validator {
-	for _, a := range allowed {
-		if value == a {
-			return v
+// Email checks that value is a valid email address when it is not empty.
+func Email(field, value string) Rule {
+	return func() *Error {
+		if value != "" && !emailRegex.MatchString(value) {
+			return fail(field, "must be a valid email address")
 		}
+		return nil
 	}
-	v.errors = append(v.errors, &ValidationError{
-		Field:   field,
-		Message: fmt.Sprintf("must be one of: %s", strings.Join(allowed, ", ")),
-	})
-	return v
 }
 
-// Custom adds a custom validation rule.
-func (v *Validator) Custom(field string, valid bool, message string) *Validator {
-	if !valid {
-		v.errors = append(v.errors, &ValidationError{Field: field, Message: message})
+// Match checks that value matches expr.
+func Match(field, value string, expr *regexp.Regexp, message string) Rule {
+	return func() *Error {
+		if expr == nil {
+			return fail(field, "invalid regex")
+		}
+		if !expr.MatchString(value) {
+			return failMessage(field, message)
+		}
+		return nil
 	}
-	return v
 }
 
-// Validate returns all collected validation errors.
-func (v *Validator) Validate() ValidationErrors {
-	return v.errors
+// MatchString checks that value matches pattern.
+func MatchString(field, value, pattern, message string) Rule {
+	return func() *Error {
+		matched, err := regexp.MatchString(pattern, value)
+		if err != nil {
+			return fail(field, "invalid regex pattern %q: %v", pattern, err)
+		}
+		if !matched {
+			return failMessage(field, message)
+		}
+		return nil
+	}
 }
 
-// ValidateOrNil returns nil if no errors, otherwise returns ValidationErrors.
-func (v *Validator) ValidateOrNil() error {
-	return v.errors.ErrorOrNil()
+// In checks that value equals one of allowed.
+func In[T comparable](field string, value T, allowed ...T) Rule {
+	return func() *Error {
+		for _, item := range allowed {
+			if value == item {
+				return nil
+			}
+		}
+		return fail(field, "must be one of: %s", joinValues(allowed))
+	}
+}
+
+// Custom adds a caller-defined validation failure.
+func Custom(field string, valid bool, message string) Rule {
+	return func() *Error {
+		if !valid {
+			return failMessage(field, message)
+		}
+		return nil
+	}
+}
+
+func fail(field, format string, args ...any) *Error {
+	return &Error{Field: field, Message: fmt.Sprintf(format, args...)}
+}
+
+func failMessage(field, message string) *Error {
+	return &Error{Field: field, Message: message}
+}
+
+func joinValues[T any](values []T) string {
+	parts := make([]string, len(values))
+	for i, value := range values {
+		parts[i] = fmt.Sprint(value)
+	}
+	return strings.Join(parts, ", ")
 }

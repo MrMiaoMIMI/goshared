@@ -32,6 +32,9 @@ const (
 
 // HTTPStatus 错误码对应的 HTTP 状态码。
 func (c ErrorCode) HTTPStatus() int {
+	if c == Success {
+		return 200
+	}
 	return int(c) / 100000
 }
 

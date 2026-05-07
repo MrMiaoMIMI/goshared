@@ -9,24 +9,8 @@ import (
 // Number is a constraint for all numeric types.
 type Number interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 |
-		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr |
 		~float32 | ~float64
-}
-
-// Min returns the smaller of two ordered values.
-func Min[T cmp.Ordered](a, b T) T {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// Max returns the larger of two ordered values.
-func Max[T cmp.Ordered](a, b T) T {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // Clamp restricts val to the range [lo, hi].

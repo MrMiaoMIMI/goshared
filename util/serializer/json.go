@@ -1,3 +1,4 @@
+// Package serializer provides JSON serialization helpers.
 package serializer
 
 import (
@@ -5,59 +6,63 @@ import (
 	"encoding/json"
 )
 
-// JsonMarshal marshals v to JSON bytes.
-func JsonMarshal(v any) ([]byte, error) {
+// Marshal marshals v to JSON bytes.
+func Marshal(v any) ([]byte, error) {
 	return json.Marshal(v)
 }
 
-// JsonUnmarshal unmarshals JSON bytes into v.
-func JsonUnmarshal(data []byte, v any) error {
+// Unmarshal unmarshals JSON bytes into v.
+func Unmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
 }
 
-// JsonBytes marshals v to JSON bytes, returning nil on error.
-func JsonBytes(v any) []byte {
-	b, _ := JsonMarshal(v)
-	return b
+// String marshals v to a JSON string.
+func String(v any) (string, error) {
+	data, err := Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
-// JsonString marshals v to a JSON string.
-func JsonString(v any) string {
-	return string(JsonBytes(v))
-}
-
-// JsonPretty marshals v to indented JSON bytes.
-func JsonPretty(v any) ([]byte, error) {
+// Pretty marshals v to indented JSON bytes.
+func Pretty(v any) ([]byte, error) {
 	return json.MarshalIndent(v, "", "  ")
 }
 
-// JsonPrettyString marshals v to an indented JSON string.
-func JsonPrettyString(v any) string {
-	b, err := JsonPretty(v)
+// PrettyString marshals v to an indented JSON string.
+func PrettyString(v any) (string, error) {
+	data, err := Pretty(v)
 	if err != nil {
-		return "{}"
+		return "", err
 	}
-	return string(b)
+	return string(data), nil
 }
 
-// JsonSafeUnmarshal unmarshals JSON bytes into v, using json.Number for numeric values
-// to avoid float64 precision loss.
-func JsonSafeUnmarshal(data []byte, v any) error {
+// UnmarshalUseNumber unmarshals JSON using json.Number for numeric values.
+func UnmarshalUseNumber(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	return dec.Decode(v)
 }
 
-// JsonClone deep-copies src into dst by marshaling and unmarshaling.
-func JsonClone(src, dst any) error {
-	data, err := json.Marshal(src)
+// Copy deep-copies src into dst by marshaling and unmarshaling JSON.
+func Copy(src, dst any) error {
+	data, err := Marshal(src)
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, dst)
+	return Unmarshal(data, dst)
 }
 
-// JsonValid reports whether data is valid JSON.
-func JsonValid(data []byte) bool {
+// Clone deep-copies src through JSON and returns a typed copy.
+func Clone[T any](src T) (T, error) {
+	var dst T
+	err := Copy(src, &dst)
+	return dst, err
+}
+
+// Valid reports whether data is valid JSON.
+func Valid(data []byte) bool {
 	return json.Valid(data)
 }

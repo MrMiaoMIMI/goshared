@@ -1,6 +1,7 @@
+// Package maputil provides generic helpers for map transformations.
 package maputil
 
-// Keys returns all keys of a map.
+// Keys returns all keys from m.
 func Keys[K comparable, V any](m map[K]V) []K {
 	keys := make([]K, 0, len(m))
 	for k := range m {
@@ -9,7 +10,7 @@ func Keys[K comparable, V any](m map[K]V) []K {
 	return keys
 }
 
-// Values returns all values of a map.
+// Values returns all values from m.
 func Values[K comparable, V any](m map[K]V) []V {
 	values := make([]V, 0, len(m))
 	for _, v := range m {
@@ -18,82 +19,71 @@ func Values[K comparable, V any](m map[K]V) []V {
 	return values
 }
 
-// GetOrDefault returns the value for key, or defaultVal if not found.
-func GetOrDefault[K comparable, V any](m map[K]V, key K, defaultVal V) V {
+// GetOr returns m[key], or fallback when key does not exist.
+func GetOr[K comparable, V any](m map[K]V, key K, fallback V) V {
 	if v, ok := m[key]; ok {
 		return v
 	}
-	return defaultVal
+	return fallback
 }
 
-// Merge merges multiple maps into one. Later maps override earlier ones.
+// Merge merges maps into a new map. Later maps override earlier maps.
 func Merge[K comparable, V any](maps ...map[K]V) map[K]V {
-	result := make(map[K]V)
+	size := 0
+	for _, m := range maps {
+		size += len(m)
+	}
+	out := make(map[K]V, size)
 	for _, m := range maps {
 		for k, v := range m {
-			result[k] = v
+			out[k] = v
 		}
 	}
-	return result
+	return out
 }
 
-// FilterMap returns a new map containing only entries satisfying the predicate.
-func FilterMap[K comparable, V any](m map[K]V, fn func(K, V) bool) map[K]V {
-	result := make(map[K]V)
+// Filter returns a new map containing entries that satisfy fn.
+func Filter[K comparable, V any](m map[K]V, fn func(K, V) bool) map[K]V {
+	out := make(map[K]V)
 	for k, v := range m {
 		if fn(k, v) {
-			result[k] = v
+			out[k] = v
 		}
 	}
-	return result
+	return out
 }
 
-// MapValues transforms map values using the given function.
+// MapValues transforms map values while preserving keys.
 func MapValues[K comparable, V any, U any](m map[K]V, fn func(V) U) map[K]U {
-	result := make(map[K]U, len(m))
+	out := make(map[K]U, len(m))
 	for k, v := range m {
-		result[k] = fn(v)
+		out[k] = fn(v)
 	}
-	return result
+	return out
 }
 
-// ContainsKey checks if the map contains the given key.
-func ContainsKey[K comparable, V any](m map[K]V, key K) bool {
-	_, ok := m[key]
-	return ok
-}
-
-// Invert swaps keys and values. If multiple keys have the same value, one wins arbitrarily.
-func Invert[K comparable, V comparable](m map[K]V) map[V]K {
-	result := make(map[V]K, len(m))
-	for k, v := range m {
-		result[v] = k
-	}
-	return result
-}
-
-// Pick returns a new map containing only the specified keys.
+// Pick returns a new map containing only selected keys.
 func Pick[K comparable, V any](m map[K]V, keys ...K) map[K]V {
-	result := make(map[K]V, len(keys))
+	out := make(map[K]V, len(keys))
 	for _, k := range keys {
 		if v, ok := m[k]; ok {
-			result[k] = v
+			out[k] = v
 		}
 	}
-	return result
+	return out
 }
 
-// Omit returns a new map with the specified keys removed.
+// Omit returns a new map without selected keys.
 func Omit[K comparable, V any](m map[K]V, keys ...K) map[K]V {
-	exclude := make(map[K]struct{}, len(keys))
+	excluded := make(map[K]struct{}, len(keys))
 	for _, k := range keys {
-		exclude[k] = struct{}{}
+		excluded[k] = struct{}{}
 	}
-	result := make(map[K]V, len(m))
+	out := make(map[K]V, len(m))
 	for k, v := range m {
-		if _, ok := exclude[k]; !ok {
-			result[k] = v
+		if _, ok := excluded[k]; !ok {
+			out[k] = v
 		}
 	}
-	return result
+	return out
 }

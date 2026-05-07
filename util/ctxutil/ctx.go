@@ -68,28 +68,6 @@ func IsExpired(ctx context.Context) bool {
 	}
 }
 
-// Detach creates a new context that is NOT cancelled when the parent is cancelled,
-// but still carries the parent's values. Useful for background tasks that should
-// outlive the request lifecycle.
-func Detach(ctx context.Context) context.Context {
-	return detachedCtx{ctx}
-}
-
-type detachedCtx struct {
-	parent context.Context
-}
-
-func (d detachedCtx) Deadline() (time.Time, bool) { return time.Time{}, false }
-func (d detachedCtx) Done() <-chan struct{}         { return nil }
-func (d detachedCtx) Err() error                   { return nil }
-func (d detachedCtx) Value(key any) any             { return d.parent.Value(key) }
-
-// WithTimeout is a convenience wrapper that returns a context with a timeout
-// and a cleanup function. The caller must call cleanup when done.
-func WithTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, d)
-}
-
 // Merge creates a context that is cancelled when either ctx1 or ctx2 is cancelled.
 // Values are looked up from ctx1 first, then ctx2.
 func Merge(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {

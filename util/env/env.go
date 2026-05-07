@@ -1,28 +1,31 @@
-// Package env provides utility functions for reading environment variables with type safety.
+// Package env provides typed environment variable helpers.
 package env
 
 import (
 	"os"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/MrMiaoMIMI/goshared/util/convutil"
 )
 
-// Get returns the value of the environment variable or empty string.
-func Get(key string) string {
+// Value returns the raw value of key, or an empty string when key is not set.
+func Value(key string) string {
 	return os.Getenv(key)
 }
 
-// GetOrDefault returns the value of the environment variable or the default value.
-func GetOrDefault(key, defaultVal string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+// Get reads key and converts it into T. It returns fallback when key is unset
+// or conversion fails.
+func Get[T convutil.Scalar](key string, fallback T) T {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
 	}
-	return defaultVal
+	return convutil.ToOr[T](v, fallback)
 }
 
-// MustGet returns the value of the environment variable or panics if not set.
-func MustGet(key string) string {
+// Must returns key's raw value, panicking when key is unset or empty.
+func Must(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
 		panic("env: required environment variable " + key + " is not set")
@@ -30,86 +33,29 @@ func MustGet(key string) string {
 	return v
 }
 
-// GetInt returns the environment variable as an int, or defaultVal on error.
-func GetInt(key string, defaultVal int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultVal
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return defaultVal
-	}
-	return n
-}
-
-// GetInt64 returns the environment variable as an int64, or defaultVal on error.
-func GetInt64(key string, defaultVal int64) int64 {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultVal
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil {
-		return defaultVal
-	}
-	return n
-}
-
-// GetFloat64 returns the environment variable as a float64, or defaultVal on error.
-func GetFloat64(key string, defaultVal float64) float64 {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultVal
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return defaultVal
-	}
-	return f
-}
-
-// GetBool returns the environment variable as a bool, or defaultVal on error.
-// Truthy: "true", "1", "yes", "on" (case-insensitive).
-// Falsy: "false", "0", "no", "off", "" (case-insensitive).
-func GetBool(key string, defaultVal bool) bool {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultVal
-	}
-	switch strings.ToLower(v) {
-	case "true", "1", "yes", "on":
-		return true
-	case "false", "0", "no", "off":
-		return false
-	default:
-		return defaultVal
-	}
-}
-
-// GetDuration returns the environment variable as a time.Duration, or defaultVal on error.
-// The value should be in Go duration format (e.g., "5s", "1m30s", "2h").
-func GetDuration(key string, defaultVal time.Duration) time.Duration {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultVal
+// Duration reads key as a time.Duration. It expects Go duration syntax such as
+// "500ms", "5s", or "2h".
+func Duration(key string, fallback time.Duration) time.Duration {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
-		return defaultVal
+		return fallback
 	}
 	return d
 }
 
-// GetSlice returns the environment variable split by separator.
-// Returns defaultVal if the variable is not set.
-func GetSlice(key, separator string, defaultVal []string) []string {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultVal
+// Slice reads key, splits it by separator, trims whitespace, and removes empty
+// values. It returns fallback when key is unset or empty.
+func Slice(key, separator string, fallback []string) []string {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
 	}
 	parts := strings.Split(v, separator)
-	var result []string
+	result := make([]string, 0, len(parts))
 	for _, p := range parts {
 		trimmed := strings.TrimSpace(p)
 		if trimmed != "" {
@@ -119,30 +65,29 @@ func GetSlice(key, separator string, defaultVal []string) []string {
 	return result
 }
 
-// IsSet returns true if the environment variable is set (even if empty).
+// IsSet returns true when key is present, even if its value is empty.
 func IsSet(key string) bool {
 	_, ok := os.LookupEnv(key)
 	return ok
 }
 
-// IsProd returns true if the environment looks like production.
-// Checks GO_ENV, APP_ENV, ENV for "production" or "prod".
+// IsProd returns true if GO_ENV, APP_ENV, or ENV is "production" or "prod".
 func IsProd() bool {
-	for _, key := range []string{"GO_ENV", "APP_ENV", "ENV"} {
-		v := strings.ToLower(os.Getenv(key))
-		if v == "production" || v == "prod" {
-			return true
-		}
-	}
-	return false
+	return matchMode("production", "prod")
 }
 
-// IsDev returns true if the environment looks like development.
+// IsDev returns true if GO_ENV, APP_ENV, or ENV is "development" or "dev".
 func IsDev() bool {
+	return matchMode("development", "dev")
+}
+
+func matchMode(values ...string) bool {
 	for _, key := range []string{"GO_ENV", "APP_ENV", "ENV"} {
-		v := strings.ToLower(os.Getenv(key))
-		if v == "development" || v == "dev" {
-			return true
+		current := strings.ToLower(os.Getenv(key))
+		for _, value := range values {
+			if current == value {
+				return true
+			}
 		}
 	}
 	return false

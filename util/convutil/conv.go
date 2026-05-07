@@ -1,177 +1,270 @@
-// Package convutil provides type conversion utility functions.
+// Package convutil provides small, explicit conversions for scalar values.
 package convutil
 
 import (
 	"fmt"
+	"math"
+	"reflect"
 	"strconv"
+	"strings"
 )
 
-// ToInt64 converts any numeric or string value to int64.
-func ToInt64(v any) (int64, error) {
-	switch val := v.(type) {
-	case int:
-		return int64(val), nil
-	case int8:
-		return int64(val), nil
-	case int16:
-		return int64(val), nil
-	case int32:
-		return int64(val), nil
-	case int64:
-		return val, nil
-	case uint:
-		return int64(val), nil
-	case uint8:
-		return int64(val), nil
-	case uint16:
-		return int64(val), nil
-	case uint32:
-		return int64(val), nil
-	case uint64:
-		return int64(val), nil
-	case float32:
-		return int64(val), nil
-	case float64:
-		return int64(val), nil
-	case string:
-		return strconv.ParseInt(val, 10, 64)
-	case bool:
-		if val {
-			return 1, nil
+// Signed is any signed integer type.
+type Signed interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64
+}
+
+// Unsigned is any unsigned integer type.
+type Unsigned interface {
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+}
+
+// Float is any floating point type.
+type Float interface {
+	~float32 | ~float64
+}
+
+// Number is any integer or floating point type.
+type Number interface {
+	Signed | Unsigned | Float
+}
+
+// Scalar is a supported target type for To.
+type Scalar interface {
+	Number | ~bool | ~string
+}
+
+// To converts v into T.
+//
+// Supported target types are strings, bools, integers, unsigned integers, and
+// floats, including user-defined aliases of those types.
+func To[T Scalar](v any) (T, error) {
+	var zero T
+	target := reflect.TypeOf(zero)
+
+	switch target.Kind() {
+	case reflect.String:
+		return cast[T](String(v)), nil
+	case reflect.Bool:
+		b, err := parseBool(v)
+		if err != nil {
+			return zero, err
 		}
-		return 0, nil
+		return cast[T](b), nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n, err := parseInt64(v, target.Bits())
+		if err != nil {
+			return zero, err
+		}
+		return cast[T](n), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		n, err := parseUint64(v, target.Bits())
+		if err != nil {
+			return zero, err
+		}
+		return cast[T](n), nil
+	case reflect.Float32, reflect.Float64:
+		n, err := parseFloat64(v, target.Bits())
+		if err != nil {
+			return zero, err
+		}
+		return cast[T](n), nil
 	default:
-		return 0, fmt.Errorf("convutil: cannot convert %T to int64", v)
+		return zero, fmt.Errorf("convutil: unsupported target type %s", target)
 	}
 }
 
-// ToInt64Or converts v to int64, returning fallback on error.
-func ToInt64Or(v any, fallback int64) int64 {
-	n, err := ToInt64(v)
+// ToOr converts v into T, returning fallback if conversion fails.
+func ToOr[T Scalar](v any, fallback T) T {
+	value, err := To[T](v)
 	if err != nil {
 		return fallback
 	}
-	return n
+	return value
 }
 
-// ToFloat64 converts any numeric or string value to float64.
-func ToFloat64(v any) (float64, error) {
+// String returns a readable string representation of v.
+func String(v any) string {
 	switch val := v.(type) {
-	case int:
-		return float64(val), nil
-	case int8:
-		return float64(val), nil
-	case int16:
-		return float64(val), nil
-	case int32:
-		return float64(val), nil
-	case int64:
-		return float64(val), nil
-	case uint:
-		return float64(val), nil
-	case uint8:
-		return float64(val), nil
-	case uint16:
-		return float64(val), nil
-	case uint32:
-		return float64(val), nil
-	case uint64:
-		return float64(val), nil
-	case float32:
-		return float64(val), nil
-	case float64:
-		return val, nil
-	case string:
-		return strconv.ParseFloat(val, 64)
-	default:
-		return 0, fmt.Errorf("convutil: cannot convert %T to float64", v)
-	}
-}
-
-// ToFloat64Or converts v to float64, returning fallback on error.
-func ToFloat64Or(v any, fallback float64) float64 {
-	n, err := ToFloat64(v)
-	if err != nil {
-		return fallback
-	}
-	return n
-}
-
-// ToString converts any value to its string representation.
-func ToString(v any) string {
-	switch val := v.(type) {
+	case nil:
+		return ""
 	case string:
 		return val
 	case []byte:
 		return string(val)
-	case int:
-		return strconv.FormatInt(int64(val), 10)
-	case int8:
-		return strconv.FormatInt(int64(val), 10)
-	case int16:
-		return strconv.FormatInt(int64(val), 10)
-	case int32:
-		return strconv.FormatInt(int64(val), 10)
-	case int64:
-		return strconv.FormatInt(val, 10)
-	case uint:
-		return strconv.FormatUint(uint64(val), 10)
-	case uint8:
-		return strconv.FormatUint(uint64(val), 10)
-	case uint16:
-		return strconv.FormatUint(uint64(val), 10)
-	case uint32:
-		return strconv.FormatUint(uint64(val), 10)
-	case uint64:
-		return strconv.FormatUint(val, 10)
-	case float32:
-		return strconv.FormatFloat(float64(val), 'f', -1, 32)
-	case float64:
-		return strconv.FormatFloat(val, 'f', -1, 64)
-	case bool:
-		return strconv.FormatBool(val)
-	case nil:
-		return ""
 	case fmt.Stringer:
 		return val.String()
 	case error:
 		return val.Error()
+	case bool:
+		return strconv.FormatBool(val)
+	}
+
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(rv.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return strconv.FormatUint(rv.Uint(), 10)
+	case reflect.Float32:
+		return strconv.FormatFloat(rv.Float(), 'f', -1, 32)
+	case reflect.Float64:
+		return strconv.FormatFloat(rv.Float(), 'f', -1, 64)
 	default:
 		return fmt.Sprintf("%v", v)
 	}
 }
 
-// ToBool converts a value to bool.
-// "true", "1", "yes", "on" → true; "false", "0", "no", "off", "" → false.
-func ToBool(v any) (bool, error) {
-	switch val := v.(type) {
-	case bool:
-		return val, nil
-	case int, int8, int16, int32, int64:
-		n, _ := ToInt64(val)
-		return n != 0, nil
-	case uint, uint8, uint16, uint32, uint64:
-		n, _ := ToInt64(val)
-		return n != 0, nil
-	case string:
-		switch val {
-		case "true", "1", "yes", "on", "TRUE", "True", "YES", "Yes", "ON", "On":
+func cast[T Scalar](v any) T {
+	var zero T
+	target := reflect.TypeOf(zero)
+	return reflect.ValueOf(v).Convert(target).Interface().(T)
+}
+
+func parseInt64(v any, bits int) (int64, error) {
+	if v == nil {
+		return 0, fmt.Errorf("convutil: cannot convert <nil> to int")
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n := rv.Int()
+		if n < minSigned(bits) || n > maxSigned(bits) {
+			return 0, fmt.Errorf("convutil: %d overflows int%d", n, bits)
+		}
+		return n, nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		n := rv.Uint()
+		if n > uint64(maxSigned(bits)) {
+			return 0, fmt.Errorf("convutil: %d overflows int%d", n, bits)
+		}
+		return int64(n), nil
+	case reflect.Float32, reflect.Float64:
+		n := rv.Float()
+		if n < float64(minSigned(bits)) || n > float64(maxSigned(bits)) {
+			return 0, fmt.Errorf("convutil: %v overflows int%d", n, bits)
+		}
+		return int64(n), nil
+	case reflect.Bool:
+		if rv.Bool() {
+			return 1, nil
+		}
+		return 0, nil
+	case reflect.String:
+		return strconv.ParseInt(strings.TrimSpace(rv.String()), 10, bits)
+	default:
+		return 0, fmt.Errorf("convutil: cannot convert %T to int", v)
+	}
+}
+
+func parseUint64(v any, bits int) (uint64, error) {
+	if v == nil {
+		return 0, fmt.Errorf("convutil: cannot convert <nil> to uint")
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n := rv.Int()
+		if n < 0 {
+			return 0, fmt.Errorf("convutil: cannot convert negative value %d to uint", n)
+		}
+		if uint64(n) > maxUnsigned(bits) {
+			return 0, fmt.Errorf("convutil: %d overflows uint%d", n, bits)
+		}
+		return uint64(n), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		n := rv.Uint()
+		if n > maxUnsigned(bits) {
+			return 0, fmt.Errorf("convutil: %d overflows uint%d", n, bits)
+		}
+		return n, nil
+	case reflect.Float32, reflect.Float64:
+		n := rv.Float()
+		if n < 0 || n > float64(maxUnsigned(bits)) {
+			return 0, fmt.Errorf("convutil: %v overflows uint%d", n, bits)
+		}
+		return uint64(n), nil
+	case reflect.Bool:
+		if rv.Bool() {
+			return 1, nil
+		}
+		return 0, nil
+	case reflect.String:
+		return strconv.ParseUint(strings.TrimSpace(rv.String()), 10, bits)
+	default:
+		return 0, fmt.Errorf("convutil: cannot convert %T to uint", v)
+	}
+}
+
+func parseFloat64(v any, bits int) (float64, error) {
+	if v == nil {
+		return 0, fmt.Errorf("convutil: cannot convert <nil> to float")
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(rv.Int()), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return float64(rv.Uint()), nil
+	case reflect.Float32, reflect.Float64:
+		return rv.Float(), nil
+	case reflect.Bool:
+		if rv.Bool() {
+			return 1, nil
+		}
+		return 0, nil
+	case reflect.String:
+		return strconv.ParseFloat(strings.TrimSpace(rv.String()), bits)
+	default:
+		return 0, fmt.Errorf("convutil: cannot convert %T to float", v)
+	}
+}
+
+func parseBool(v any) (bool, error) {
+	if v == nil {
+		return false, fmt.Errorf("convutil: cannot convert <nil> to bool")
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Bool:
+		return rv.Bool(), nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int() != 0, nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return rv.Uint() != 0, nil
+	case reflect.Float32, reflect.Float64:
+		return rv.Float() != 0, nil
+	case reflect.String:
+		switch strings.ToLower(strings.TrimSpace(rv.String())) {
+		case "true", "t", "1", "yes", "y", "on":
 			return true, nil
-		case "false", "0", "no", "off", "", "FALSE", "False", "NO", "No", "OFF", "Off":
+		case "false", "f", "0", "no", "n", "off", "":
 			return false, nil
 		default:
-			return false, fmt.Errorf("convutil: cannot convert string %q to bool", val)
+			return false, fmt.Errorf("convutil: cannot convert string %q to bool", rv.String())
 		}
 	default:
 		return false, fmt.Errorf("convutil: cannot convert %T to bool", v)
 	}
 }
 
-// ToBoolOr converts v to bool, returning fallback on error.
-func ToBoolOr(v any, fallback bool) bool {
-	b, err := ToBool(v)
-	if err != nil {
-		return fallback
+func maxSigned(bits int) int64 {
+	if bits >= 64 {
+		return math.MaxInt64
 	}
-	return b
+	return int64(1)<<(bits-1) - 1
+}
+
+func minSigned(bits int) int64 {
+	if bits >= 64 {
+		return math.MinInt64
+	}
+	return -int64(1) << (bits - 1)
+}
+
+func maxUnsigned(bits int) uint64 {
+	if bits >= 64 {
+		return math.MaxUint64
+	}
+	return uint64(1)<<bits - 1
 }
