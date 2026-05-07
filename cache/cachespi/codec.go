@@ -5,9 +5,9 @@ import "encoding/json"
 // Codec defines how cache values are serialized and deserialized.
 //
 // Redis cache always stores bytes, so Redis codecs must serialize values into
-// bytes. Reference semantics are not supported by Redis. In-memory cache only
-// uses Codec when configured through cachehelper.WithInMemCodec; otherwise it
-// stores Go values directly by reference.
+// bytes. Reference semantics are not supported by Redis. In-memory cache uses
+// Codec when InMemoryConfig.Codec is set to CodecJSON; otherwise it stores Go
+// values directly by reference.
 type Codec interface {
 	Marshal(value any) ([]byte, error)
 	Unmarshal(data []byte, receiver any) error

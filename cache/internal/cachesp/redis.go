@@ -12,8 +12,19 @@ import (
 
 var _ cachespi.Cache = (*RedisCache)(nil)
 
-// RedisOption configures the RedisCache.
-type RedisOption func(*redisConfig)
+// RedisConfig configures the RedisCache implementation.
+type RedisConfig struct {
+	Addr         string
+	Password     string
+	DB           int
+	PoolSize     int
+	MinIdleConns int
+	DialTimeout  time.Duration
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	DefaultTTL   time.Duration
+	Codec        cachespi.Codec
+}
 
 type redisConfig struct {
 	addr         string
@@ -41,54 +52,48 @@ func defaultRedisConfig() *redisConfig {
 	}
 }
 
-// WithRedisAddr sets the Redis server address (host:port).
-func WithRedisAddr(addr string) RedisOption {
-	return func(c *redisConfig) { c.addr = addr }
-}
+func resolveRedisConfig(userCfg RedisConfig) (*redisConfig, error) {
+	cfg := defaultRedisConfig()
+	if userCfg.Addr != "" {
+		cfg.addr = userCfg.Addr
+	}
+	cfg.password = userCfg.Password
+	if userCfg.DB != 0 {
+		cfg.db = userCfg.DB
+	}
+	if userCfg.PoolSize != 0 {
+		cfg.poolSize = userCfg.PoolSize
+	}
+	if userCfg.MinIdleConns != 0 {
+		cfg.minIdleConns = userCfg.MinIdleConns
+	}
+	if userCfg.DialTimeout != 0 {
+		cfg.dialTimeout = userCfg.DialTimeout
+	}
+	if userCfg.ReadTimeout != 0 {
+		cfg.readTimeout = userCfg.ReadTimeout
+	}
+	if userCfg.WriteTimeout != 0 {
+		cfg.writeTimeout = userCfg.WriteTimeout
+	}
+	if userCfg.DefaultTTL != 0 {
+		cfg.defaultTTL = userCfg.DefaultTTL
+	}
+	cfg.codec = userCfg.Codec
 
-// WithRedisPassword sets the Redis password.
-func WithRedisPassword(password string) RedisOption {
-	return func(c *redisConfig) { c.password = password }
-}
-
-// WithRedisDB selects the Redis database index.
-func WithRedisDB(db int) RedisOption {
-	return func(c *redisConfig) { c.db = db }
-}
-
-// WithRedisPoolSize sets the maximum number of connections in the pool.
-func WithRedisPoolSize(size int) RedisOption {
-	return func(c *redisConfig) { c.poolSize = size }
-}
-
-// WithRedisMinIdleConns sets the minimum number of idle connections.
-func WithRedisMinIdleConns(n int) RedisOption {
-	return func(c *redisConfig) { c.minIdleConns = n }
-}
-
-// WithRedisDialTimeout sets the timeout for establishing new connections.
-func WithRedisDialTimeout(d time.Duration) RedisOption {
-	return func(c *redisConfig) { c.dialTimeout = d }
-}
-
-// WithRedisReadTimeout sets the timeout for socket reads.
-func WithRedisReadTimeout(d time.Duration) RedisOption {
-	return func(c *redisConfig) { c.readTimeout = d }
-}
-
-// WithRedisWriteTimeout sets the timeout for socket writes.
-func WithRedisWriteTimeout(d time.Duration) RedisOption {
-	return func(c *redisConfig) { c.writeTimeout = d }
-}
-
-// WithRedisDefaultTTL sets the default TTL for cache entries.
-func WithRedisDefaultTTL(d time.Duration) RedisOption {
-	return func(c *redisConfig) { c.defaultTTL = d }
-}
-
-// WithRedisCodec sets the byte serializer used by RedisCache.
-func WithRedisCodec(codec cachespi.Codec) RedisOption {
-	return func(c *redisConfig) { c.codec = codec }
+	if cfg.db < 0 {
+		return nil, fmt.Errorf("cache: redis db must be greater than or equal to 0")
+	}
+	if cfg.poolSize < 0 {
+		return nil, fmt.Errorf("cache: redis pool_size must be greater than or equal to 0")
+	}
+	if cfg.minIdleConns < 0 {
+		return nil, fmt.Errorf("cache: redis min_idle_conns must be greater than or equal to 0")
+	}
+	if _, err := resolveTTL(cachespi.DefaultExpiration, cfg.defaultTTL); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // RedisCache implements cachespi.Cache using Redis as the backend.
@@ -100,14 +105,9 @@ type RedisCache struct {
 }
 
 // NewRedisCache creates a new Cache backed by Redis.
-func NewRedisCache(opts ...RedisOption) (*RedisCache, error) {
-	cfg := defaultRedisConfig()
-	for _, opt := range opts {
-		if opt != nil {
-			opt(cfg)
-		}
-	}
-	if _, err := resolveTTL(cachespi.DefaultExpiration, cfg.defaultTTL); err != nil {
+func NewRedisCache(userCfg RedisConfig) (*RedisCache, error) {
+	cfg, err := resolveRedisConfig(userCfg)
+	if err != nil {
 		return nil, err
 	}
 

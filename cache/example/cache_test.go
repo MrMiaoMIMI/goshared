@@ -87,9 +87,9 @@ func runCacheExamples(t *testing.T, backend exampleCacheBackend) {
 func newInMemExampleCache(t *testing.T) exampleCache {
 	t.Helper()
 
-	cache, err := cachehelper.NewInMemCache(
-		cachehelper.WithInMemDefaultTTL(5 * time.Minute),
-	)
+	cache, err := cachehelper.NewInMemCache(cachespi.InMemoryConfig{
+		DefaultTTL: 5 * time.Minute,
+	})
 	assertNoError(t, "NewInMemCache", err)
 	t.Cleanup(func() {
 		assertNoError(t, "Close in-memory cache", cache.Close(context.Background()))
@@ -104,11 +104,11 @@ func newRedisExampleCache(t *testing.T) exampleCache {
 	t.Helper()
 
 	server := miniredis.RunT(t)
-	cache, err := cachehelper.NewRedisCache(
-		cachehelper.WithRedisAddr(server.Addr()),
-		cachehelper.WithRedisDefaultTTL(5*time.Minute),
-		cachehelper.WithRedisCodec(cachespi.JSONCodec{}),
-	)
+	cache, err := cachehelper.NewRedisCache(cachespi.RedisConfig{
+		Addr:       server.Addr(),
+		DefaultTTL: 5 * time.Minute,
+		Codec:      cachespi.CodecJSON,
+	})
 	assertNoError(t, "NewRedisCache", err)
 	t.Cleanup(func() {
 		assertNoError(t, "Close redis cache", cache.Close(context.Background()))

@@ -157,7 +157,7 @@ func TestRistrettoDefaultCodecStoresReferences(t *testing.T) {
 
 func TestRistrettoJSONCodecCopiesValues(t *testing.T) {
 	ctx := context.Background()
-	cache, err := NewRistrettoCache(WithRistrettoCodec(cachespi.JSONCodec{}))
+	cache, err := NewRistrettoCache(RistrettoConfig{Codec: cachespi.JSONCodec{}})
 	if err != nil {
 		t.Fatalf("NewRistrettoCache: %v", err)
 	}
@@ -212,12 +212,12 @@ func TestRedisRejectsInvalidExpiration(t *testing.T) {
 func TestRedisLoadDoesNotFallbackOnGetError(t *testing.T) {
 	ctx := context.Background()
 	server := miniredis.RunT(t)
-	cache, err := NewRedisCache(
-		WithRedisAddr(server.Addr()),
-		WithRedisDialTimeout(20*time.Millisecond),
-		WithRedisReadTimeout(20*time.Millisecond),
-		WithRedisWriteTimeout(20*time.Millisecond),
-	)
+	cache, err := NewRedisCache(RedisConfig{
+		Addr:         server.Addr(),
+		DialTimeout:  20 * time.Millisecond,
+		ReadTimeout:  20 * time.Millisecond,
+		WriteTimeout: 20 * time.Millisecond,
+	})
 	if err != nil {
 		t.Fatalf("NewRedisCache: %v", err)
 	}
@@ -248,12 +248,12 @@ func TestRedisLoadDoesNotFallbackOnGetError(t *testing.T) {
 func TestRedisLoadManyDoesNotFallbackOnMGetError(t *testing.T) {
 	ctx := context.Background()
 	server := miniredis.RunT(t)
-	cache, err := NewRedisCache(
-		WithRedisAddr(server.Addr()),
-		WithRedisDialTimeout(20*time.Millisecond),
-		WithRedisReadTimeout(20*time.Millisecond),
-		WithRedisWriteTimeout(20*time.Millisecond),
-	)
+	cache, err := NewRedisCache(RedisConfig{
+		Addr:         server.Addr(),
+		DialTimeout:  20 * time.Millisecond,
+		ReadTimeout:  20 * time.Millisecond,
+		WriteTimeout: 20 * time.Millisecond,
+	})
 	if err != nil {
 		t.Fatalf("NewRedisCache: %v", err)
 	}
@@ -398,10 +398,10 @@ func TestRedisCustomCodec(t *testing.T) {
 	t.Cleanup(func() {
 		_ = client.Close()
 	})
-	cache, err := NewRedisCache(
-		WithRedisAddr(server.Addr()),
-		WithRedisCodec(prefixCodec{}),
-	)
+	cache, err := NewRedisCache(RedisConfig{
+		Addr:  server.Addr(),
+		Codec: prefixCodec{},
+	})
 	if err != nil {
 		t.Fatalf("NewRedisCache: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestRedisCloseClosesClient(t *testing.T) {
 	ctx := context.Background()
 	server := miniredis.RunT(t)
 
-	cache, err := NewRedisCache(WithRedisAddr(server.Addr()))
+	cache, err := NewRedisCache(RedisConfig{Addr: server.Addr()})
 	if err != nil {
 		t.Fatalf("NewRedisCache: %v", err)
 	}
@@ -454,10 +454,10 @@ func newRedisTestCache(t *testing.T) (*RedisCache, *redis.Client, *miniredis.Min
 		_ = client.Close()
 	})
 
-	cache, err := NewRedisCache(
-		WithRedisAddr(server.Addr()),
-		WithRedisDefaultTTL(5*time.Minute),
-	)
+	cache, err := NewRedisCache(RedisConfig{
+		Addr:       server.Addr(),
+		DefaultTTL: 5 * time.Minute,
+	})
 	if err != nil {
 		t.Fatalf("NewRedisCache: %v", err)
 	}
@@ -468,7 +468,7 @@ func newRedisTestCache(t *testing.T) (*RedisCache, *redis.Client, *miniredis.Min
 func newRistrettoTestCache(t *testing.T) *RistrettoCache {
 	t.Helper()
 
-	cache, err := NewRistrettoCache()
+	cache, err := NewRistrettoCache(RistrettoConfig{})
 	if err != nil {
 		t.Fatalf("NewRistrettoCache: %v", err)
 	}

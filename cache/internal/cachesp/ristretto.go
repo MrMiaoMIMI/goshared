@@ -13,8 +13,14 @@ import (
 
 var _ cachespi.Cache = (*RistrettoCache)(nil)
 
-// RistrettoOption configures the RistrettoCache.
-type RistrettoOption func(*cacheConfig)
+// RistrettoConfig configures the RistrettoCache implementation.
+type RistrettoConfig struct {
+	NumCounters int64
+	MaxCost     int64
+	BufferItems int64
+	DefaultTTL  time.Duration
+	Codec       cachespi.Codec
+}
 
 type cacheConfig struct {
 	numCounters int64
@@ -33,24 +39,35 @@ func defaultConfig() *cacheConfig {
 	}
 }
 
-func WithRistrettoDefaultTTL(d time.Duration) RistrettoOption {
-	return func(c *cacheConfig) { c.defaultTTL = d }
-}
+func resolveRistrettoConfig(userCfg RistrettoConfig) (*cacheConfig, error) {
+	cfg := defaultConfig()
+	if userCfg.NumCounters != 0 {
+		cfg.numCounters = userCfg.NumCounters
+	}
+	if userCfg.MaxCost != 0 {
+		cfg.maxCost = userCfg.MaxCost
+	}
+	if userCfg.BufferItems != 0 {
+		cfg.bufferItems = userCfg.BufferItems
+	}
+	if userCfg.DefaultTTL != 0 {
+		cfg.defaultTTL = userCfg.DefaultTTL
+	}
+	cfg.codec = userCfg.Codec
 
-func WithRistrettoNumCounters(n int64) RistrettoOption {
-	return func(c *cacheConfig) { c.numCounters = n }
-}
-
-func WithRistrettoMaxCost(n int64) RistrettoOption {
-	return func(c *cacheConfig) { c.maxCost = n }
-}
-
-func WithRistrettoBufferItems(n int64) RistrettoOption {
-	return func(c *cacheConfig) { c.bufferItems = n }
-}
-
-func WithRistrettoCodec(codec cachespi.Codec) RistrettoOption {
-	return func(c *cacheConfig) { c.codec = codec }
+	if cfg.numCounters <= 0 {
+		return nil, fmt.Errorf("cache: num_counters must be greater than 0")
+	}
+	if cfg.maxCost <= 0 {
+		return nil, fmt.Errorf("cache: max_cost must be greater than 0")
+	}
+	if cfg.bufferItems <= 0 {
+		return nil, fmt.Errorf("cache: buffer_items must be greater than 0")
+	}
+	if _, err := resolveTTL(cachespi.DefaultExpiration, cfg.defaultTTL); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // RistrettoCache implements cachespi.Cache using dgraph-io/ristretto as the backend.
@@ -62,14 +79,9 @@ type RistrettoCache struct {
 	closed     bool
 }
 
-func NewRistrettoCache(opts ...RistrettoOption) (*RistrettoCache, error) {
-	cfg := defaultConfig()
-	for _, opt := range opts {
-		if opt != nil {
-			opt(cfg)
-		}
-	}
-	if _, err := resolveTTL(cachespi.DefaultExpiration, cfg.defaultTTL); err != nil {
+func NewRistrettoCache(userCfg RistrettoConfig) (*RistrettoCache, error) {
+	cfg, err := resolveRistrettoConfig(userCfg)
+	if err != nil {
 		return nil, err
 	}
 
