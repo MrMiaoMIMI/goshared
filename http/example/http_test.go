@@ -99,11 +99,17 @@ func newTestServer() *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-func newTestClient(baseURL string) httpspi.Client {
-	return httphelper.NewClient(
-		httphelper.WithBaseURL(baseURL),
-		httphelper.WithDefaultTimeout(5*time.Second),
-	)
+func newTestClient(t *testing.T, baseURL string) httpspi.Client {
+	t.Helper()
+
+	client, err := httphelper.NewClient(httpspi.ClientConfig{
+		BaseURL:        baseURL,
+		DefaultTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return client
 }
 
 // ==================== Tests ====================
@@ -111,7 +117,7 @@ func newTestClient(baseURL string) httpspi.Client {
 func Test_GET_Simple(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var echo EchoResponse
 	resp, err := client.New().Get("/echo").Request(context.Background(), &echo, nil)
@@ -124,7 +130,7 @@ func Test_GET_Simple(t *testing.T) {
 func Test_POST_WithJSON(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	reqBody := CreateUserRequest{Name: "Alice", Email: "alice@example.com"}
 	var echo EchoResponse
@@ -143,7 +149,7 @@ func Test_POST_WithJSON(t *testing.T) {
 func Test_PUT_WithBodyBytes(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var echo EchoResponse
 	_, err := client.New().Put("/echo").BodyBytes([]byte("raw data")).Request(context.Background(), &echo, nil)
@@ -155,7 +161,7 @@ func Test_PUT_WithBodyBytes(t *testing.T) {
 func Test_DELETE(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var echo EchoResponse
 	_, err := client.New().Delete("/echo").Request(context.Background(), &echo, nil)
@@ -166,7 +172,7 @@ func Test_DELETE(t *testing.T) {
 func Test_PATCH(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var echo EchoResponse
 	_, err := client.New().Patch("/echo").Request(context.Background(), &echo, nil)
@@ -177,7 +183,7 @@ func Test_PATCH(t *testing.T) {
 func Test_HEAD(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	resp, err := client.New().Head("/echo").Receive(context.Background(), 5*time.Second, nil, nil)
 	assertNoError(t, "HEAD /echo", err)
@@ -188,7 +194,7 @@ func Test_HEAD(t *testing.T) {
 func Test_QueryParam(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var echo EchoResponse
 	_, err := client.New().
@@ -204,7 +210,7 @@ func Test_QueryParam(t *testing.T) {
 func Test_QueryStruct(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	params := SearchParams{Query: "goshared", Page: 1, Limit: 0}
 	var echo EchoResponse
@@ -224,7 +230,7 @@ func Test_QueryStruct(t *testing.T) {
 func Test_CustomHeaders(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var echo EchoResponse
 	_, err := client.New().
@@ -240,16 +246,19 @@ func Test_CustomHeaders(t *testing.T) {
 func Test_DefaultHeaders(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := httphelper.NewClient(
-		httphelper.WithBaseURL(server.URL),
-		httphelper.WithDefaultTimeout(5*time.Second),
-		httphelper.WithDefaultHeaders(map[string]string{
+	client, err := httphelper.NewClient(httpspi.ClientConfig{
+		BaseURL:        server.URL,
+		DefaultTimeout: 5 * time.Second,
+		DefaultHeaders: map[string]string{
 			"Authorization": "Bearer test-token",
-		}),
-	)
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 
 	var echo EchoResponse
-	_, err := client.New().Get("/echo").Request(context.Background(), &echo, nil)
+	_, err = client.New().Get("/echo").Request(context.Background(), &echo, nil)
 	assertNoError(t, "GET with default headers", err)
 	assertEqual(t, "Authorization", "Bearer test-token", echo.Headers["Authorization"])
 }
@@ -257,7 +266,7 @@ func Test_DefaultHeaders(t *testing.T) {
 func Test_Cookies(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var echo EchoResponse
 	_, err := client.New().
@@ -279,7 +288,7 @@ func Test_Cookies(t *testing.T) {
 func Test_StatusError_400(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var apiErr APIResponse
 	resp, err := client.New().Get("/error/400").Request(context.Background(), nil, &apiErr)
@@ -306,7 +315,7 @@ func Test_StatusError_400(t *testing.T) {
 func Test_StatusError_500(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var apiErr APIResponse
 	resp, err := client.New().Get("/error/500").Request(context.Background(), nil, &apiErr)
@@ -327,7 +336,7 @@ func Test_StatusError_500(t *testing.T) {
 func Test_Request_ResponseMetadata(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var echo EchoResponse
 	resp, err := client.New().Get("/echo").Request(context.Background(), &echo, nil)
@@ -345,7 +354,7 @@ func Test_Request_ResponseMetadata(t *testing.T) {
 func Test_Receive_ReturnsResponse(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var echo EchoResponse
 	resp, err := client.New().Get("/echo").Receive(context.Background(), 5*time.Second, &echo, nil)
@@ -358,7 +367,7 @@ func Test_Receive_ReturnsResponse(t *testing.T) {
 func Test_Receive_FailureDecoding(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	var apiErr APIResponse
 	resp, err := client.New().Get("/error/400").Receive(context.Background(), 5*time.Second, nil, &apiErr)
@@ -372,12 +381,15 @@ func Test_Timeout(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
 
-	client := httphelper.NewClient(
-		httphelper.WithBaseURL(server.URL),
-		httphelper.WithDefaultTimeout(200*time.Millisecond),
-	)
+	client, err := httphelper.NewClient(httpspi.ClientConfig{
+		BaseURL:        server.URL,
+		DefaultTimeout: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 
-	_, err := client.New().Get("/slow").Request(context.Background(), nil, nil)
+	_, err = client.New().Get("/slow").Request(context.Background(), nil, nil)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -387,7 +399,7 @@ func Test_Timeout(t *testing.T) {
 func Test_New_Isolation(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient(server.URL)
+	client := newTestClient(t, server.URL)
 
 	c1 := client.New().Set("X-Request-ID", "req-1").Get("/echo")
 	c2 := client.New().Set("X-Request-ID", "req-2").Get("/echo")
@@ -405,7 +417,7 @@ func Test_New_Isolation(t *testing.T) {
 func Test_BaseOverride(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
-	client := newTestClient("http://will-be-overridden.example.com")
+	client := newTestClient(t, "http://will-be-overridden.example.com")
 
 	var echo EchoResponse
 	_, err := client.New().Base(server.URL).Get("/echo").Request(context.Background(), &echo, nil)

@@ -4,4 +4,5 @@
 
 - [Cache Module Guide](cache/docs/cache_guide.md)
 - [DB Module Guide](db/docs/db_guide.md)
+- [HTTP Module Guide](http/docs/http_guide.md)
 - [MQ Module Guide](mq/docs/mq_guide.md)

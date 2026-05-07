@@ -1,59 +1,32 @@
-// Package httphelper provides factory functions for creating httpspi.Client instances.
-// Callers use this package to construct clients without importing internal packages.
+// Package httphelper provides config-driven factory functions for creating
+// httpspi.Client instances.
+//
+// Keep HTTP client settings in application configuration and create clients
+// with NewClient or NewClients during service startup. httphelper intentionally
+// does not expose WithXxx option functions; request-specific values are set on
+// httpspi.Client.New() when sending a request.
 package httphelper
 
 import (
-	"net/http"
-	"time"
-
 	"github.com/MrMiaoMIMI/goshared/http/httpspi"
 	"github.com/MrMiaoMIMI/goshared/http/internal/httpsp"
 )
 
-// ClientOption is a type alias so callers don't need to import the internal package.
-type ClientOption = httpsp.ClientOption
-
-// NewClient creates a new httpspi.Client with the given options.
+// NewClient creates a new httpspi.Client from cfg.
+//
+// Configs are plain structs with json/yaml tags, so callers can keep base URL,
+// timeout, default headers, and retry settings in application config files.
 //
 // Example:
 //
-//	client := httphelper.NewClient(
-//	    httphelper.WithBaseURL("https://api.example.com"),
-//	    httphelper.WithDefaultTimeout(10 * time.Second),
-//	)
-func NewClient(opts ...ClientOption) httpspi.Client {
-	return httpsp.NewHTTPClient(opts...)
+//	client, err := httphelper.NewClient(cfg.HTTP.Clients["user_service"])
+func NewClient(cfg httpspi.ClientConfig) (httpspi.Client, error) {
+	return httpsp.NewHTTPClient(cfg)
 }
 
-// WithBaseURL sets the base URL shared by all requests from this client.
-func WithBaseURL(baseURL string) ClientOption {
-	return httpsp.WithBaseURL(baseURL)
-}
-
-// WithDefaultHeaders sets headers applied to every request built from this client.
-func WithDefaultHeaders(headers map[string]string) ClientOption {
-	return httpsp.WithDefaultHeaders(headers)
-}
-
-// WithDefaultTimeout sets the default per-request timeout used by Client.Request().
-func WithDefaultTimeout(d time.Duration) ClientOption {
-	return httpsp.WithDefaultTimeout(d)
-}
-
-// WithHTTPClient sets the underlying *http.Client used for transport.
-func WithHTTPClient(c *http.Client) ClientOption {
-	return httpsp.WithHTTPClient(c)
-}
-
-// WithRetry sets the max retry count and delay between retries for transient failures.
-// Only network errors and 5xx responses trigger retries.
+// NewClients creates named clients from ClientConfigs.
 //
-// Example:
-//
-//	client := httphelper.NewClient(
-//	    httphelper.WithBaseURL("https://api.example.com"),
-//	    httphelper.WithRetry(3, 500*time.Millisecond),
-//	)
-func WithRetry(maxRetries int, delay time.Duration) ClientOption {
-	return httpsp.WithRetry(maxRetries, delay)
+// Use this when the application config manages multiple upstream services.
+func NewClients(configs httpspi.ClientConfigs) (httpspi.Clients, error) {
+	return httpsp.NewHTTPClients(configs)
 }

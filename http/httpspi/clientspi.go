@@ -1,5 +1,10 @@
 // Package httpspi defines the HTTP client SPI (Service Provider Interface).
-// It contains stable public interfaces for building and sending HTTP requests.
+// It contains stable public interfaces and config types for building and
+// sending HTTP requests.
+//
+// Use ClientConfig with httphelper.NewClient to create shared clients from
+// application configuration. Use Client.New() for each request to set path,
+// query, headers, body, and response decoding without leaking per-request state.
 package httpspi
 
 import (
@@ -152,6 +157,12 @@ type Response struct {
 	Status     string
 	Header     http.Header
 }
+
+// Clients is a named collection of shared HTTP clients.
+//
+// Each Client in the map should be reused for its upstream service, while every
+// request should still start from Client.New().
+type Clients map[string]Client
 
 // ResponseDecoder decodes http responses into struct values.
 type ResponseDecoder interface {

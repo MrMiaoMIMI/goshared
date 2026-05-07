@@ -21,63 +21,6 @@ import (
 
 var _ httpspi.Client = (*httpClient)(nil)
 
-// ClientOption configures the httpClient at construction time.
-type ClientOption func(*clientConfig)
-
-type clientConfig struct {
-	httpClient     *http.Client
-	baseURL        string
-	defaultTimeout time.Duration
-	defaultHeaders map[string]string
-	maxRetries     int
-	retryDelay     time.Duration
-}
-
-func defaultClientConfig() *clientConfig {
-	return &clientConfig{
-		httpClient:     &http.Client{},
-		defaultTimeout: 30 * time.Second,
-	}
-}
-
-// WithHTTPClient sets the underlying *http.Client used for sending requests.
-func WithHTTPClient(c *http.Client) ClientOption {
-	return func(cfg *clientConfig) { cfg.httpClient = c }
-}
-
-// WithBaseURL sets the base URL for all requests.
-func WithBaseURL(baseURL string) ClientOption {
-	return func(cfg *clientConfig) { cfg.baseURL = baseURL }
-}
-
-// WithDefaultTimeout sets the default timeout applied by Request().
-// Receive() uses its own explicit timeout parameter instead.
-func WithDefaultTimeout(d time.Duration) ClientOption {
-	return func(cfg *clientConfig) { cfg.defaultTimeout = d }
-}
-
-// WithDefaultHeaders sets headers that are applied to every request.
-func WithDefaultHeaders(headers map[string]string) ClientOption {
-	return func(cfg *clientConfig) { cfg.defaultHeaders = headers }
-}
-
-// WithRetry sets the max retry count and delay between retries for transient failures.
-// Only network errors and 5xx responses trigger retries.
-// Delay must be positive; enforces a minimum of 100ms to prevent tight loops.
-// maxRetries must be >= 0; negative values are clamped to 0.
-func WithRetry(maxRetries int, delay time.Duration) ClientOption {
-	return func(cfg *clientConfig) {
-		if maxRetries < 0 {
-			maxRetries = 0
-		}
-		cfg.maxRetries = maxRetries
-		if delay < 100*time.Millisecond {
-			delay = 100 * time.Millisecond
-		}
-		cfg.retryDelay = delay
-	}
-}
-
 type multipartData struct {
 	fieldName   string
 	fileName    string
@@ -106,25 +49,42 @@ type httpClient struct {
 	cookies        []*http.Cookie
 }
 
-// NewHTTPClient creates a new Client with the given options.
-func NewHTTPClient(opts ...ClientOption) httpspi.Client {
-	cfg := defaultClientConfig()
-	for _, opt := range opts {
-		opt(cfg)
+// NewHTTPClient creates a new Client from user-facing configuration.
+func NewHTTPClient(cfg httpspi.ClientConfig) (httpspi.Client, error) {
+	cfg, err := normalizeClientConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return newHTTPClient(cfg), nil
+}
+
+// NewHTTPClients creates named Clients from user-facing configuration.
+func NewHTTPClients(configs httpspi.ClientConfigs) (httpspi.Clients, error) {
+	configs, err := normalizeClientConfigs(configs)
+	if err != nil {
+		return nil, err
 	}
 
+	clients := make(httpspi.Clients, len(configs))
+	for name, cfg := range configs {
+		clients[name] = newHTTPClient(cfg)
+	}
+	return clients, nil
+}
+
+func newHTTPClient(cfg httpspi.ClientConfig) httpspi.Client {
 	header := make(http.Header)
-	for k, v := range cfg.defaultHeaders {
+	for k, v := range cfg.DefaultHeaders {
 		header.Set(k, v)
 	}
 
 	return &httpClient{
-		rawClient:      cfg.httpClient,
-		baseURL:        cfg.baseURL,
+		rawClient:      &http.Client{},
+		baseURL:        cfg.BaseURL,
 		header:         header,
-		defaultTimeout: cfg.defaultTimeout,
-		maxRetries:     cfg.maxRetries,
-		retryDelay:     cfg.retryDelay,
+		defaultTimeout: cfg.DefaultTimeout,
+		maxRetries:     cfg.Retry.MaxRetries,
+		retryDelay:     cfg.Retry.Delay,
 		respDecoder:    &jsonDecoder{},
 	}
 }
