@@ -7,18 +7,23 @@ import (
 	"go.uber.org/zap"
 )
 
-// Field 通用的日志字段类型，对外屏蔽底层日志库的实现细节
+// Field 表示一组结构化日志中的单个字段。
+//
+// 使用 String、Int、Err 等构造函数创建字段，然后传给 Debug/Info/Warn/Error。
 type Field struct {
 	zapField zap.Field
 }
 
-// toZapField 将 Field 转换为 zap.Field（内部使用）
+// 返回内部日志字段。
 func (f Field) toZapField() zap.Field {
 	return f.zapField
 }
 
-// toZapFields 将 []Field 转换为 []zap.Field（内部使用）
+// 返回内部日志字段列表。
 func toZapFields(fields []Field) []zap.Field {
+	if len(fields) == 0 {
+		return nil
+	}
 	zapFields := make([]zap.Field, len(fields))
 	for i, f := range fields {
 		zapFields[i] = f.toZapField()
@@ -26,7 +31,7 @@ func toZapFields(fields []Field) []zap.Field {
 	return zapFields
 }
 
-// ============ 基础类型字段构造函数 ============
+// ============ 基础类型字段 ============
 
 // String 创建字符串类型字段
 func String(key string, val string) Field {
@@ -88,7 +93,7 @@ func Time(key string, val time.Time) Field {
 	return Field{zapField: zap.Time(key, val)}
 }
 
-// ============ 特殊类型字段构造函数 ============
+// ============ 特殊类型字段 ============
 
 // Err 创建 error 类型字段，key 固定为 "error"
 func Err(err error) Field {
@@ -125,7 +130,7 @@ func Namespace(key string) Field {
 	return Field{zapField: zap.Namespace(key)}
 }
 
-// ============ 数组/切片类型字段构造函数 ============
+// ============ 数组/切片类型字段 ============
 
 // Strings 创建字符串切片类型字段
 func Strings(key string, val []string) Field {
@@ -156,4 +161,3 @@ func Float64s(key string, val []float64) Field {
 func Bools(key string, val []bool) Field {
 	return Field{zapField: zap.Bools(key, val)}
 }
-
